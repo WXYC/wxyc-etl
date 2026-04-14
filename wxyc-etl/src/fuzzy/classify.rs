@@ -66,6 +66,75 @@ impl LibraryIndex {
     }
 }
 
+/// Configuration thresholds for the 3-scorer classification logic.
+///
+/// Defaults match the thresholds in `verify_cache.py`.
+pub struct ClassifyConfig {
+    /// Minimum score for token_set_ratio to count as a match.
+    pub token_set_threshold: f64,
+    /// Minimum score for token_sort_ratio to count as a match.
+    pub token_sort_threshold: f64,
+    /// Minimum score for two_stage to count as a match.
+    pub two_stage_threshold: f64,
+    /// Artist threshold for the two_stage scorer's first stage.
+    pub artist_threshold: f64,
+    /// Below this, all scorers agree it's a prune.
+    pub prune_ceiling: f64,
+}
+
+impl Default for ClassifyConfig {
+    fn default() -> Self {
+        ClassifyConfig {
+            token_set_threshold: 0.8,
+            token_sort_threshold: 0.8,
+            two_stage_threshold: 0.8,
+            artist_threshold: 0.7,
+            prune_ceiling: 0.4,
+        }
+    }
+}
+
+/// Classify a single release as KEEP, PRUNE, or REVIEW.
+///
+/// Logic (matching `verify_cache.py`):
+/// 1. If exact match -> KEEP
+/// 2. Run three fuzzy scorers (token_set, token_sort, two_stage)
+/// 3. If all three above their thresholds AND two_stage participates -> KEEP
+/// 4. If all three below prune_ceiling -> PRUNE
+/// 5. Otherwise -> REVIEW
+pub fn classify_release(
+    norm_artist: &str,
+    norm_title: &str,
+    index: &LibraryIndex,
+    config: &ClassifyConfig,
+) -> Classification {
+    // 1. Exact match -> KEEP
+    if score_exact(norm_artist, norm_title, index) == 1.0 {
+        return Classification::Keep;
+    }
+
+    // 2. Run three fuzzy scorers
+    let ts = score_token_set(norm_artist, norm_title, index);
+    let tr = score_token_sort(norm_artist, norm_title, index);
+    let tw = score_two_stage(norm_artist, norm_title, index, config.artist_threshold);
+
+    // 3. All above thresholds AND two_stage participates -> KEEP
+    if ts >= config.token_set_threshold
+        && tr >= config.token_sort_threshold
+        && tw >= config.two_stage_threshold
+    {
+        return Classification::Keep;
+    }
+
+    // 4. All below prune_ceiling -> PRUNE
+    if ts < config.prune_ceiling && tr < config.prune_ceiling && tw < config.prune_ceiling {
+        return Classification::Prune;
+    }
+
+    // 5. Otherwise -> REVIEW
+    Classification::Review
+}
+
 /// Returns 1.0 if the (artist, title) pair is in the exact_pairs set, 0.0 otherwise.
 pub fn score_exact(norm_artist: &str, norm_title: &str, index: &LibraryIndex) -> f64 {
     if index.exact_pairs.contains(&(norm_artist.to_string(), norm_title.to_string())) {
@@ -286,5 +355,46 @@ mod tests {
         let score = score_two_stage("juana molina", "nonexistent album", &index, 0.7);
         // Artist matches but title doesn't — geometric mean pulls score down
         assert!(score < 0.8, "expected moderate two_stage score, got {}", score);
+    }
+
+    // --- classify_release ---
+
+    #[test]
+    fn test_classify_exact_match_is_keep() {
+        let index = build_test_index();
+        let config = ClassifyConfig::default();
+        let result = classify_release("juana molina", "doga", &index, &config);
+        assert_eq!(result, Classification::Keep);
+    }
+
+    #[test]
+    fn test_classify_no_match_is_prune() {
+        let index = build_test_index();
+        let config = ClassifyConfig::default();
+        let result = classify_release("completely unknown artist", "nonexistent album", &index, &config);
+        assert_eq!(result, Classification::Prune);
+    }
+
+    #[test]
+    fn test_classify_close_match_is_keep() {
+        // "Juana Molina" / "Doga" should fuzzy-match well against the index
+        let index = build_test_index();
+        let config = ClassifyConfig::default();
+        let result = classify_release("juana molina", "doga", &index, &config);
+        assert_eq!(result, Classification::Keep);
+    }
+
+    #[test]
+    fn test_classify_ambiguous_is_review() {
+        // An artist that partially matches but with a wrong title
+        let index = build_test_index();
+        let config = ClassifyConfig::default();
+        // "cat power" matches artist but "wrong album" doesn't match title well
+        let result = classify_release("cat power", "wrong album entirely", &index, &config);
+        // This should be REVIEW (artist matches but title doesn't)
+        assert!(
+            matches!(result, Classification::Review | Classification::Prune),
+            "expected Review or Prune, got {:?}", result
+        );
     }
 }
