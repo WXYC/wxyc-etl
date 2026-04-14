@@ -1,0 +1,150 @@
+//! Artist and title name normalization.
+//!
+//! Normalizes names using NFKD decomposition with combining character
+//! removal, matching the behavior of `filter_csv.py:normalize_artist()` in
+//! the discogs-cache repo.
+
+use unicode_categories::UnicodeCategories;
+use unicode_normalization::UnicodeNormalization;
+
+/// Normalize an artist name for matching.
+///
+/// Applies NFKD decomposition, strips combining characters (diacritics),
+/// lowercases, and trims whitespace. This matches the Python implementation:
+///
+/// ```python
+/// nfkd = unicodedata.normalize("NFKD", name)
+/// stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
+/// return stripped.lower().strip()
+/// ```
+pub fn normalize_artist_name(name: &str) -> String {
+    let result = strip_diacritics_and_lowercase(name);
+    let trimmed = result.trim_matches(' ');
+    if trimmed.len() == result.len() {
+        result
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Strip diacritics via NFKD decomposition without lowercasing or trimming.
+///
+/// Useful for title normalization contexts where case preservation is needed.
+pub fn strip_diacritics(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.nfkd() {
+        if !c.is_mark() {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Normalize a title for matching.
+///
+/// Uses the same NFKD + combining-character-removal + lowercase + trim as
+/// `normalize_artist_name`.
+pub fn normalize_title(title: &str) -> String {
+    normalize_artist_name(title)
+}
+
+/// NFKD decompose, remove combining marks, and lowercase in a single pass.
+fn strip_diacritics_and_lowercase(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.nfkd() {
+        if !c.is_mark() {
+            for lc in c.to_lowercase() {
+                result.push(lc);
+            }
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- normalize_artist_name: 11 parity tests from discogs-xml-converter/src/filter.rs ---
+
+    #[test]
+    fn test_normalize_lowercase() {
+        assert_eq!(normalize_artist_name("Radiohead"), "radiohead");
+    }
+
+    #[test]
+    fn test_normalize_strip_spaces() {
+        assert_eq!(normalize_artist_name("  Radiohead  "), "radiohead");
+    }
+
+    #[test]
+    fn test_normalize_all_caps() {
+        assert_eq!(normalize_artist_name("RADIOHEAD"), "radiohead");
+    }
+
+    #[test]
+    fn test_normalize_mixed_case_strip() {
+        assert_eq!(normalize_artist_name("  Mixed Case  "), "mixed case");
+    }
+
+    #[test]
+    fn test_normalize_empty() {
+        assert_eq!(normalize_artist_name(""), "");
+    }
+
+    #[test]
+    fn test_normalize_bjork() {
+        assert_eq!(normalize_artist_name("Björk"), "bjork");
+    }
+
+    #[test]
+    fn test_normalize_sigur_ros() {
+        assert_eq!(normalize_artist_name("Sigur Rós"), "sigur ros");
+    }
+
+    #[test]
+    fn test_normalize_motorhead() {
+        assert_eq!(normalize_artist_name("Motörhead"), "motorhead");
+    }
+
+    #[test]
+    fn test_normalize_husker_du() {
+        assert_eq!(normalize_artist_name("Hüsker Dü"), "husker du");
+    }
+
+    #[test]
+    fn test_normalize_cafe_tacvba() {
+        assert_eq!(normalize_artist_name("Café Tacvba"), "cafe tacvba");
+    }
+
+    #[test]
+    fn test_normalize_zoe() {
+        assert_eq!(normalize_artist_name("Zoé"), "zoe");
+    }
+
+    // --- trim optimization paths ---
+
+    #[test]
+    fn test_normalize_trim_no_extra_alloc() {
+        assert_eq!(normalize_artist_name("Radiohead"), "radiohead");
+    }
+
+    #[test]
+    fn test_normalize_trim_leading_space() {
+        assert_eq!(normalize_artist_name("  Björk"), "bjork");
+    }
+
+    #[test]
+    fn test_normalize_trim_trailing_space() {
+        assert_eq!(normalize_artist_name("Zoé  "), "zoe");
+    }
+
+    // --- normalize_title delegates to same logic ---
+
+    #[test]
+    fn test_normalize_title_lowercase_and_diacritics() {
+        assert_eq!(normalize_title("Café Tacvba"), "cafe tacvba");
+        assert_eq!(normalize_title("  Sugar Hill  "), "sugar hill");
+        assert_eq!(normalize_title("OK Computer"), "ok computer");
+    }
+}

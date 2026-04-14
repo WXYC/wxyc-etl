@@ -1,1 +1,3 @@
-//! text module — see implementation plan for details.
+//! Text normalization, filtering, compilation detection, and artist splitting.
+
+pub mod normalize;
