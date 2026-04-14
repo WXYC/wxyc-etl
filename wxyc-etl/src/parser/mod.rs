@@ -1,1 +1,3 @@
-//! parser module — see implementation plan for details.
+//! Parsers for database dump formats.
+
+pub mod mysql;
