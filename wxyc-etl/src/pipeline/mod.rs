@@ -4,3 +4,4 @@
 //! channels for backpressure and rayon for order-preserving parallel processing.
 
 pub mod scanner;
+pub mod processor;
