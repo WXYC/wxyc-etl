@@ -66,6 +66,27 @@ pub fn copy_line(values: &[Option<&str>]) -> String {
     line
 }
 
+/// Extract a 4-digit year from a Discogs "released" field.
+///
+/// Accepts formats like "1997-06-16" or "1997". Returns `None` if the
+/// string is shorter than 4 characters or doesn't start with 4 digits.
+pub fn extract_year(released: &str) -> Option<i16> {
+    if released.len() >= 4 && released.as_bytes()[..4].iter().all(|b| b.is_ascii_digit()) {
+        released[..4].parse().ok()
+    } else {
+        None
+    }
+}
+
+/// Convert an empty string to `None`.
+pub fn empty_to_none(s: &str) -> Option<&str> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
 /// Write an integer as a COPY TEXT column value directly into a byte buffer.
 ///
 /// Uses [`itoa`] for zero-allocation integer formatting.
@@ -291,5 +312,49 @@ mod tests {
         let mut buf = Vec::new();
         write_copy_int(&mut buf, 2001i16);
         assert_eq!(&buf, b"2001");
+    }
+
+    // -- extract_year tests --
+
+    #[test]
+    fn test_extract_year_full_date() {
+        assert_eq!(extract_year("1997-06-16"), Some(1997));
+    }
+
+    #[test]
+    fn test_extract_year_year_only() {
+        assert_eq!(extract_year("2024"), Some(2024));
+    }
+
+    #[test]
+    fn test_extract_year_empty() {
+        assert_eq!(extract_year(""), None);
+    }
+
+    #[test]
+    fn test_extract_year_non_numeric() {
+        assert_eq!(extract_year("Unknown"), None);
+    }
+
+    #[test]
+    fn test_extract_year_partial_digits() {
+        assert_eq!(extract_year("199"), None);
+    }
+
+    #[test]
+    fn test_extract_year_leading_zeros() {
+        assert_eq!(extract_year("0001-01-01"), Some(1));
+    }
+
+    // -- empty_to_none tests --
+
+    #[test]
+    fn test_empty_to_none_empty() {
+        assert_eq!(empty_to_none(""), None);
+    }
+
+    #[test]
+    fn test_empty_to_none_non_empty() {
+        assert_eq!(empty_to_none("hello"), Some("hello"));
     }
 }
