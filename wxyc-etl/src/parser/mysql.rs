@@ -30,8 +30,39 @@ pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
         return SqlValue::Null;
     }
 
+    // String value
+    if data[*pos] == b'\'' {
+        *pos += 1;
+        let mut s = Vec::new();
+        while *pos < len {
+            let ch = data[*pos];
+            if ch == b'\\' && *pos + 1 < len {
+                let next = data[*pos + 1];
+                match next {
+                    b'\'' => s.push(b'\''),
+                    b'\\' => s.push(b'\\'),
+                    b'n' => s.push(b'\n'),
+                    b'r' => s.push(b'\r'),
+                    b't' => s.push(b'\t'),
+                    b'0' => s.push(0),
+                    _ => {
+                        s.push(b'\\');
+                        s.push(next);
+                    }
+                }
+                *pos += 2;
+            } else if ch == b'\'' {
+                *pos += 1;
+                break;
+            } else {
+                s.push(ch);
+                *pos += 1;
+            }
+        }
+        SqlValue::Str(String::from_utf8_lossy(&s).into_owned())
+    }
     // NULL
-    if *pos + 3 < len && &data[*pos..*pos + 4] == b"NULL" {
+    else if *pos + 3 < len && &data[*pos..*pos + 4] == b"NULL" {
         *pos += 4;
         SqlValue::Null
     }
@@ -57,7 +88,9 @@ pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
             SqlValue::Int(num_str.parse().unwrap_or(0))
         }
     } else {
-        todo!()
+        // Unknown byte — skip it and return Null
+        *pos += 1;
+        SqlValue::Null
     }
 }
 
@@ -153,6 +186,96 @@ mod tests {
         match val {
             SqlValue::Float(f) => assert!((f - 3.14).abs() < 0.001),
             other => panic!("expected Float, got {other:?}"),
+        }
+    }
+
+    // === Cycle 3: parse_single_value — strings with escapes ===
+
+    #[test]
+    fn test_parse_simple_string() {
+        let data = b"'hello',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "hello"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_string() {
+        let data = b"'',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, ""),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_escaped_quote() {
+        let data = b"'it\\'s a test',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "it's a test"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_escaped_backslash() {
+        let data = b"'path\\\\to\\\\file',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "path\\to\\file"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_newline() {
+        let data = b"'line1\\nline2',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "line1\nline2"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_null_byte() {
+        let data = b"'has\\0null',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s.as_bytes(), b"has\0null"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_comma() {
+        let data = b"'hello, world',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "hello, world"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_parentheses() {
+        let data = b"'(remix)',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "(remix)"),
+            other => panic!("expected Str, got {other:?}"),
         }
     }
 }
