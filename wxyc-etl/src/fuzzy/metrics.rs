@@ -29,11 +29,50 @@ fn sorted_tokens(s: &str) -> String {
     tokens.join(" ")
 }
 
+/// Join token parts, skipping empty strings.
+fn join_nonempty(parts: &[&str]) -> String {
+    parts.iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ")
+}
+
+/// SequenceMatcher-like ratio: `2 * LCS_length / (len1 + len2)`.
+///
+/// Matches the base ratio used by rapidfuzz's `fuzz.ratio()` (indel
+/// normalized similarity). This is different from Levenshtein ratio
+/// because substitutions cost 2 (delete + insert) rather than 1.
+fn fuzz_ratio(s1: &str, s2: &str) -> f64 {
+    let a: Vec<char> = s1.chars().collect();
+    let b: Vec<char> = s2.chars().collect();
+    let total = a.len() + b.len();
+    if total == 0 {
+        return 1.0;
+    }
+    let lcs = lcs_length(&a, &b);
+    (2 * lcs) as f64 / total as f64
+}
+
+/// Compute length of the longest common subsequence using O(n) space DP.
+fn lcs_length(a: &[char], b: &[char]) -> usize {
+    let mut prev = vec![0usize; b.len() + 1];
+    for &ca in a {
+        let mut diag = 0;
+        for (j, &cb) in b.iter().enumerate() {
+            let old = prev[j + 1];
+            if ca == cb {
+                prev[j + 1] = diag + 1;
+            } else {
+                prev[j + 1] = prev[j + 1].max(prev[j]);
+            }
+            diag = old;
+        }
+    }
+    *prev.last().unwrap_or(&0)
+}
+
 /// Token set ratio: compares intersection/remainder token sets.
 ///
 /// Port of rapidfuzz's `fuzz.token_set_ratio`. Tokenizes both strings,
 /// computes the intersection and remainders, then returns the max
-/// `levenshtein_ratio` across three comparison pairs. Returns 0.0–1.0.
+/// fuzz_ratio across three comparison pairs. Returns 0.0–1.0.
 pub fn token_set_ratio(s1: &str, s2: &str) -> f64 {
     use std::collections::BTreeSet;
 
@@ -51,21 +90,16 @@ pub fn token_set_ratio(s1: &str, s2: &str) -> f64 {
     let diff1: BTreeSet<_> = t1.difference(&t2).cloned().collect();
     let diff2: BTreeSet<_> = t2.difference(&t1).cloned().collect();
 
-    let sorted_inter: String = intersection.iter().cloned().collect::<Vec<_>>().join(" ");
-    let combined1 = if diff1.is_empty() {
-        sorted_inter.clone()
-    } else {
-        format!("{} {}", sorted_inter, diff1.into_iter().collect::<Vec<_>>().join(" "))
-    };
-    let combined2 = if diff2.is_empty() {
-        sorted_inter.clone()
-    } else {
-        format!("{} {}", sorted_inter, diff2.into_iter().collect::<Vec<_>>().join(" "))
-    };
+    let inter_str: String = intersection.iter().cloned().collect::<Vec<_>>().join(" ");
+    let diff1_str: String = diff1.into_iter().collect::<Vec<_>>().join(" ");
+    let diff2_str: String = diff2.into_iter().collect::<Vec<_>>().join(" ");
 
-    let r1 = levenshtein_ratio(&sorted_inter, &combined1);
-    let r2 = levenshtein_ratio(&sorted_inter, &combined2);
-    let r3 = levenshtein_ratio(&combined1, &combined2);
+    let combined1 = join_nonempty(&[&inter_str, &diff1_str]);
+    let combined2 = join_nonempty(&[&inter_str, &diff2_str]);
+
+    let r1 = fuzz_ratio(&inter_str, &combined1);
+    let r2 = fuzz_ratio(&inter_str, &combined2);
+    let r3 = fuzz_ratio(&combined1, &combined2);
 
     r1.max(r2).max(r3)
 }
@@ -76,7 +110,7 @@ pub fn token_set_ratio(s1: &str, s2: &str) -> f64 {
 pub fn token_sort_ratio(s1: &str, s2: &str) -> f64 {
     let a = sorted_tokens(s1);
     let b = sorted_tokens(s2);
-    levenshtein_ratio(&a, &b)
+    fuzz_ratio(&a, &b)
 }
 
 /// Jaro-Winkler similarity. Thin wrapper around `strsim::jaro_winkler`.

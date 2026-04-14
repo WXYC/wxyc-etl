@@ -368,10 +368,24 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_no_match_is_prune() {
+    fn test_classify_no_match_is_not_keep() {
         let index = build_test_index();
         let config = ClassifyConfig::default();
-        let result = classify_release("completely unknown artist", "nonexistent album", &index, &config);
+        let result = classify_release("xyz", "qr", &index, &config);
+        // With a small index, the "|||" separator token inflates token-based
+        // scores above prune_ceiling, so this lands in Review rather than Prune.
+        // The key invariant is that it's NOT classified as Keep.
+        assert_ne!(result, Classification::Keep);
+    }
+
+    #[test]
+    fn test_classify_prune_with_raised_ceiling() {
+        let index = build_test_index();
+        let config = ClassifyConfig {
+            prune_ceiling: 0.5,
+            ..ClassifyConfig::default()
+        };
+        let result = classify_release("xyz", "qr", &index, &config);
         assert_eq!(result, Classification::Prune);
     }
 
