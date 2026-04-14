@@ -6,6 +6,7 @@ mod parser;
 mod state;
 mod import_utils;
 mod schema;
+mod fuzzy;
 
 /// Register a submodule and add it to sys.modules so `from wxyc_etl.X import Y` works.
 fn register_submodule(
@@ -34,5 +35,6 @@ fn wxyc_etl(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_submodule(py, m, "state", state::register)?;
     register_submodule(py, m, "import_utils", import_utils::register)?;
     register_submodule(py, m, "schema", schema::register)?;
+    register_submodule(py, m, "fuzzy", fuzzy::register)?;
     Ok(())
 }
