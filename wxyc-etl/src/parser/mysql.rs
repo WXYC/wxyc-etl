@@ -178,7 +178,59 @@ pub fn find_values_start(line: &[u8]) -> Option<usize> {
 /// `INSERT INTO \`table_name\`` statements, parses the VALUES, and returns
 /// all rows.
 pub fn load_table_rows(path: &Path, table_name: &str) -> Result<Vec<Vec<SqlValue>>> {
-    todo!()
+    let mut all_rows = Vec::new();
+    scan_table_lines(path, table_name, |line| {
+        if let Some(values_offset) = find_values_start(line) {
+            let rows = parse_sql_values(&line[values_offset..]);
+            all_rows.extend(rows);
+        }
+    })?;
+    Ok(all_rows)
+}
+
+/// Scan a memory-mapped dump file line-by-line, invoking `callback` for each
+/// line that contains an INSERT for the given table.
+fn scan_table_lines<F>(path: &Path, table_name: &str, mut callback: F) -> Result<()>
+where
+    F: FnMut(&[u8]),
+{
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+
+    let metadata = file.metadata()?;
+    if metadata.len() == 0 {
+        return Ok(());
+    }
+
+    let mmap = unsafe { Mmap::map(&file) }
+        .with_context(|| format!("cannot mmap {}", path.display()))?;
+
+    let needle = format!("INSERT INTO `{table_name}`");
+    let needle_bytes = needle.as_bytes();
+
+    let data = &mmap[..];
+    let len = data.len();
+    let mut start = 0;
+
+    while start < len {
+        let end = memchr(b'\n', &data[start..])
+            .map(|pos| start + pos)
+            .unwrap_or(len);
+
+        let line = &data[start..end];
+
+        if line.len() >= needle_bytes.len()
+            && line
+                .windows(needle_bytes.len())
+                .any(|w| w == needle_bytes)
+        {
+            callback(line);
+        }
+
+        start = end + 1;
+    }
+
+    Ok(())
 }
 
 /// Streaming variant of [`load_table_rows`] that invokes `callback` per row
@@ -412,5 +464,79 @@ mod tests {
         let line = b"CREATE TABLE `table` (id int)";
         let offset = find_values_start(line);
         assert!(offset.is_none());
+    }
+
+    // === Cycle 6: load_table_rows — full file parsing ===
+
+    #[test]
+    fn test_load_table_rows_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "-- MySQL dump\nINSERT INTO `GENRE` VALUES (1,'Rock'),(2,'Jazz'),(3,'Electronic');\nINSERT INTO `OTHER_TABLE` VALUES (99,'ignored');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[0][1], SqlValue::Str("Rock".to_string()));
+        assert_eq!(rows[2][1], SqlValue::Str("Electronic".to_string()));
+    }
+
+    #[test]
+    fn test_load_table_rows_multiple_inserts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `data` VALUES (1,'first');\nINSERT INTO `data` VALUES (2,'second');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "data").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[1][0], SqlValue::Int(2));
+    }
+
+    #[test]
+    fn test_load_table_rows_ignores_other_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `wanted` VALUES (1,'yes');\nINSERT INTO `unwanted` VALUES (2,'no');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "wanted").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][1], SqlValue::Str("yes".to_string()));
+    }
+
+    #[test]
+    fn test_load_table_rows_skips_comments_and_blanks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "-- MySQL dump\n\nINSERT INTO `GENRE` VALUES (1,'Rock');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_load_table_rows_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(&path, "").unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert!(rows.is_empty());
     }
 }
