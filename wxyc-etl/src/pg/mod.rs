@@ -4,6 +4,7 @@
 //! deduplication tracking, and administrative operations for PostgreSQL
 //! bulk imports.
 
+pub mod admin;
 pub mod batch;
 pub mod copy;
 pub mod dedup;
