@@ -1,0 +1,829 @@
+//! MySQL dump file parser.
+//!
+//! Parses INSERT statements from MySQL dump files, extracting rows as
+//! vectors of [`SqlValue`]. Uses memory-mapped file access for efficient
+//! processing of large dump files.
+//!
+//! Ported from `semantic-index/rust/sql-parser/`, with PyO3 bindings
+//! removed. The core functions operate on `&[u8]` and `&Path` and return
+//! Rust types. PyO3 bindings are provided separately by `wxyc-etl-python`.
+
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use memchr::memchr;
+use memmap2::Mmap;
+
+/// A parsed SQL value from an INSERT statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SqlValue {
+    Null,
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
+impl SqlValue {
+    /// Returns the string contents if this is a `Str` variant.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            SqlValue::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the integer value if this is an `Int` variant.
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            SqlValue::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Returns the float value if this is a `Float` variant.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            SqlValue::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for SqlValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SqlValue::Null => write!(f, "NULL"),
+            SqlValue::Int(n) => write!(f, "{n}"),
+            SqlValue::Float(v) => write!(f, "{v}"),
+            SqlValue::Str(s) => write!(f, "'{s}'"),
+        }
+    }
+}
+
+/// Parse a single SQL value starting at position `pos`, advancing `pos` past the value.
+pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
+    let len = data.len();
+    if *pos >= len {
+        return SqlValue::Null;
+    }
+
+    // String value
+    if data[*pos] == b'\'' {
+        *pos += 1;
+        let mut s = Vec::new();
+        while *pos < len {
+            let ch = data[*pos];
+            if ch == b'\\' && *pos + 1 < len {
+                let next = data[*pos + 1];
+                match next {
+                    b'\'' => s.push(b'\''),
+                    b'\\' => s.push(b'\\'),
+                    b'n' => s.push(b'\n'),
+                    b'r' => s.push(b'\r'),
+                    b't' => s.push(b'\t'),
+                    b'0' => s.push(0),
+                    _ => {
+                        s.push(b'\\');
+                        s.push(next);
+                    }
+                }
+                *pos += 2;
+            } else if ch == b'\'' {
+                *pos += 1;
+                break;
+            } else {
+                s.push(ch);
+                *pos += 1;
+            }
+        }
+        SqlValue::Str(String::from_utf8_lossy(&s).into_owned())
+    }
+    // NULL
+    else if *pos + 3 < len && &data[*pos..*pos + 4] == b"NULL" {
+        *pos += 4;
+        SqlValue::Null
+    }
+    // Number (int or float)
+    else if data[*pos].is_ascii_digit() || data[*pos] == b'-' || data[*pos] == b'+' {
+        let start = *pos;
+        let mut has_dot = false;
+        while *pos < len {
+            let ch = data[*pos];
+            if ch == b'.' {
+                has_dot = true;
+                *pos += 1;
+            } else if ch.is_ascii_digit() || ch == b'-' || ch == b'+' {
+                *pos += 1;
+            } else {
+                break;
+            }
+        }
+        let num_str = std::str::from_utf8(&data[start..*pos]).unwrap_or("0");
+        if has_dot {
+            SqlValue::Float(num_str.parse().unwrap_or(0.0))
+        } else {
+            SqlValue::Int(num_str.parse().unwrap_or(0))
+        }
+    } else {
+        // Unknown byte — skip it and return Null
+        *pos += 1;
+        SqlValue::Null
+    }
+}
+
+/// Parse the VALUES portion of an INSERT statement into rows of [`SqlValue`].
+///
+/// `data` should start at the first `(` of the VALUES clause.
+pub fn parse_sql_values(data: &[u8]) -> Vec<Vec<SqlValue>> {
+    let mut rows = Vec::new();
+    let mut i = 0;
+    let len = data.len();
+
+    while i < len {
+        // Skip to opening paren
+        while i < len && data[i] != b'(' {
+            if data[i] == b';' {
+                return rows;
+            }
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+        i += 1; // skip '('
+
+        let mut row = Vec::new();
+
+        loop {
+            // Skip whitespace
+            while i < len && data[i] == b' ' {
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+
+            if data[i] == b')' {
+                i += 1;
+                break;
+            }
+
+            if data[i] == b',' && row.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            let val = parse_single_value(data, &mut i);
+            row.push(val);
+
+            // Skip comma between values
+            if i < len && data[i] == b',' {
+                i += 1;
+            }
+        }
+
+        if !row.is_empty() {
+            rows.push(row);
+        }
+    }
+
+    rows
+}
+
+/// Find the byte offset of the first `(` after the VALUES keyword in an INSERT line.
+///
+/// Returns `None` if the line does not contain a VALUES clause.
+pub fn find_values_start(line: &[u8]) -> Option<usize> {
+    // Case-insensitive scan for "VALUES"
+    let upper: Vec<u8> = line.iter().map(|b| b.to_ascii_uppercase()).collect();
+    let pos = upper
+        .windows(6)
+        .position(|w| w == b"VALUES")?;
+    // Find the first '(' after VALUES
+    let after_values = pos + 6;
+    for j in after_values..line.len() {
+        if line[j] == b'(' {
+            return Some(j);
+        }
+    }
+    None
+}
+
+/// Load all rows for a given table from a MySQL dump file.
+///
+/// Memory-maps the file for zero-copy access. Scans line-by-line for
+/// `INSERT INTO \`table_name\`` statements, parses the VALUES, and returns
+/// all rows.
+pub fn load_table_rows(path: &Path, table_name: &str) -> Result<Vec<Vec<SqlValue>>> {
+    let mut all_rows = Vec::new();
+    scan_table_lines(path, table_name, |line| {
+        if let Some(values_offset) = find_values_start(line) {
+            let rows = parse_sql_values(&line[values_offset..]);
+            all_rows.extend(rows);
+        }
+    })?;
+    Ok(all_rows)
+}
+
+/// Scan a memory-mapped dump file line-by-line, invoking `callback` for each
+/// line that contains an INSERT for the given table.
+fn scan_table_lines<F>(path: &Path, table_name: &str, mut callback: F) -> Result<()>
+where
+    F: FnMut(&[u8]),
+{
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+
+    let metadata = file.metadata()?;
+    if metadata.len() == 0 {
+        return Ok(());
+    }
+
+    let mmap = unsafe { Mmap::map(&file) }
+        .with_context(|| format!("cannot mmap {}", path.display()))?;
+
+    let needle = format!("INSERT INTO `{table_name}`");
+    let needle_bytes = needle.as_bytes();
+
+    let data = &mmap[..];
+    let len = data.len();
+    let mut start = 0;
+
+    while start < len {
+        let end = memchr(b'\n', &data[start..])
+            .map(|pos| start + pos)
+            .unwrap_or(len);
+
+        let line = &data[start..end];
+
+        if line.len() >= needle_bytes.len()
+            && line
+                .windows(needle_bytes.len())
+                .any(|w| w == needle_bytes)
+        {
+            callback(line);
+        }
+
+        start = end + 1;
+    }
+
+    Ok(())
+}
+
+/// Streaming variant of [`load_table_rows`] that invokes `callback` per row
+/// instead of collecting all rows into memory.
+///
+/// Returns the number of rows processed.
+pub fn iter_table_rows<F>(path: &Path, table_name: &str, mut callback: F) -> Result<usize>
+where
+    F: FnMut(Vec<SqlValue>),
+{
+    let mut count = 0;
+    scan_table_lines(path, table_name, |line| {
+        if let Some(values_offset) = find_values_start(line) {
+            let rows = parse_sql_values(&line[values_offset..]);
+            for row in rows {
+                callback(row);
+                count += 1;
+            }
+        }
+    })?;
+    Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === Cycle 1: parse_single_value — NULL ===
+
+    #[test]
+    fn test_parse_null() {
+        let data = b"NULL,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        assert!(matches!(val, SqlValue::Null));
+        assert_eq!(pos, 4);
+    }
+
+    // === Cycle 2: parse_single_value — integers and floats ===
+
+    #[test]
+    fn test_parse_int() {
+        let data = b"42,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, 42),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_negative_int() {
+        let data = b"-7,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, -7),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bigint() {
+        let data = b"1710000000000,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, 1710000000000),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let data = b"3.14,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Float(f) => assert!((f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
+    }
+
+    // === Cycle 3: parse_single_value — strings with escapes ===
+
+    #[test]
+    fn test_parse_simple_string() {
+        let data = b"'hello',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "hello"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_string() {
+        let data = b"'',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, ""),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_escaped_quote() {
+        let data = b"'it\\'s a test',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "it's a test"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_escaped_backslash() {
+        let data = b"'path\\\\to\\\\file',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "path\\to\\file"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_newline() {
+        let data = b"'line1\\nline2',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "line1\nline2"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_null_byte() {
+        let data = b"'has\\0null',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s.as_bytes(), b"has\0null"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_comma() {
+        let data = b"'hello, world',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "hello, world"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_with_parentheses() {
+        let data = b"'(remix)',";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Str(s) => assert_eq!(s, "(remix)"),
+            other => panic!("expected Str, got {other:?}"),
+        }
+    }
+
+    // === Cycle 4: parse_sql_values — full VALUES parsing ===
+
+    #[test]
+    fn test_parse_values_single_row() {
+        let data = b"(1,'hello',NULL)";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[0][1], SqlValue::Str("hello".to_string()));
+        assert_eq!(rows[0][2], SqlValue::Null);
+    }
+
+    #[test]
+    fn test_parse_values_multiple_rows() {
+        let data = b"(1,'a'),(2,'b'),(3,'c')";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[1][0], SqlValue::Int(2));
+        assert_eq!(rows[2][0], SqlValue::Int(3));
+    }
+
+    #[test]
+    fn test_parse_values_with_semicolon() {
+        let data = b"(1,'hello');";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_values_empty() {
+        let data = b"";
+        let rows = parse_sql_values(data);
+        assert!(rows.is_empty());
+    }
+
+    // === Cycle 5: find_values_start ===
+
+    #[test]
+    fn test_find_values_start_basic() {
+        let line = b"INSERT INTO `table` VALUES (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+        assert_eq!(line[offset.unwrap()], b'(');
+    }
+
+    #[test]
+    fn test_find_values_start_with_columns() {
+        let line = b"INSERT INTO `table` (`col1`, `col2`) VALUES (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+        // The '(' should be the one after VALUES, not the column list paren
+        let data_after = &line[offset.unwrap()..];
+        assert!(data_after.starts_with(b"(1,"));
+    }
+
+    #[test]
+    fn test_find_values_start_case_insensitive() {
+        let line = b"INSERT INTO `table` values (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+    }
+
+    #[test]
+    fn test_find_values_start_no_values() {
+        let line = b"CREATE TABLE `table` (id int)";
+        let offset = find_values_start(line);
+        assert!(offset.is_none());
+    }
+
+    // === Cycle 6: load_table_rows — full file parsing ===
+
+    #[test]
+    fn test_load_table_rows_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "-- MySQL dump\nINSERT INTO `GENRE` VALUES (1,'Rock'),(2,'Jazz'),(3,'Electronic');\nINSERT INTO `OTHER_TABLE` VALUES (99,'ignored');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[0][1], SqlValue::Str("Rock".to_string()));
+        assert_eq!(rows[2][1], SqlValue::Str("Electronic".to_string()));
+    }
+
+    #[test]
+    fn test_load_table_rows_multiple_inserts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `data` VALUES (1,'first');\nINSERT INTO `data` VALUES (2,'second');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "data").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[1][0], SqlValue::Int(2));
+    }
+
+    #[test]
+    fn test_load_table_rows_ignores_other_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `wanted` VALUES (1,'yes');\nINSERT INTO `unwanted` VALUES (2,'no');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "wanted").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][1], SqlValue::Str("yes".to_string()));
+    }
+
+    #[test]
+    fn test_load_table_rows_skips_comments_and_blanks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "-- MySQL dump\n\nINSERT INTO `GENRE` VALUES (1,'Rock');\n",
+        )
+        .unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_load_table_rows_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(&path, "").unwrap();
+
+        let rows = load_table_rows(&path, "GENRE").unwrap();
+        assert!(rows.is_empty());
+    }
+
+    // === Cycle 7: iter_table_rows — streaming callback ===
+
+    #[test]
+    fn test_iter_table_rows_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `data` VALUES (1,'a'),(2,'b'),(3,'c');\n",
+        )
+        .unwrap();
+
+        let mut collected = Vec::new();
+        let count = iter_table_rows(&path, "data", |row| {
+            collected.push(row);
+        })
+        .unwrap();
+
+        assert_eq!(count, 3);
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0][0], SqlValue::Int(1));
+        assert_eq!(collected[2][0], SqlValue::Int(3));
+    }
+
+    #[test]
+    fn test_iter_table_rows_filters_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `wanted` VALUES (1,'yes');\nINSERT INTO `other` VALUES (2,'no');\n",
+        )
+        .unwrap();
+
+        let mut count_seen = 0;
+        let count = iter_table_rows(&path, "wanted", |_row| {
+            count_seen += 1;
+        })
+        .unwrap();
+
+        assert_eq!(count, 1);
+        assert_eq!(count_seen, 1);
+    }
+
+    // === Cycle 8: Python parity tests ===
+    // These mirror the edge cases from semantic-index/tests/unit/test_sql_parser.py
+
+    /// Helper: parse a full INSERT line via find_values_start + parse_sql_values,
+    /// matching the behavior of the Python parse_sql_values() which takes a full line.
+    fn parse_insert_line(line: &[u8]) -> Vec<Vec<SqlValue>> {
+        match find_values_start(line) {
+            Some(offset) => parse_sql_values(&line[offset..]),
+            None => vec![],
+        }
+    }
+
+    #[test]
+    fn test_parity_single_row_with_ints() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,2,3);");
+        assert_eq!(rows, vec![vec![SqlValue::Int(1), SqlValue::Int(2), SqlValue::Int(3)]]);
+    }
+
+    #[test]
+    fn test_parity_single_row_with_strings() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'hello','world');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("hello".to_string()),
+                SqlValue::Str("world".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_multiple_rows() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'a'),(2,'b'),(3,'c');");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], vec![SqlValue::Int(1), SqlValue::Str("a".to_string())]);
+        assert_eq!(rows[2], vec![SqlValue::Int(3), SqlValue::Str("c".to_string())]);
+    }
+
+    #[test]
+    fn test_parity_null_values() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,NULL,'text',NULL);");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Null,
+                SqlValue::Str("text".to_string()),
+                SqlValue::Null,
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_escaped_single_quote() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'HONEST JON\\'S/ASTRALWERKS');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("HONEST JON'S/ASTRALWERKS".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_escaped_backslash() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'back\\\\slash');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("back\\slash".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_empty_string() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'','notempty');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("".to_string()),
+                SqlValue::Str("notempty".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_float_value() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,3.14,'pi');");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        match &rows[0][1] {
+            SqlValue::Float(f) => assert!((*f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
+        assert_eq!(rows[0][2], SqlValue::Str("pi".to_string()));
+    }
+
+    #[test]
+    fn test_parity_negative_int() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (-1,'neg');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(-1), SqlValue::Str("neg".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_with_column_list() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` (`id`, `name`) VALUES (1,'bar');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("bar".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_no_values_returns_empty() {
+        let rows = parse_insert_line(b"CREATE TABLE `FOO` (id INT);");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_parity_string_with_comma() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'hello, world');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("hello, world".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_string_with_parentheses() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'(remix)');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("(remix)".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_bigint_value() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,1710000000000);");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Int(1710000000000)]]
+        );
+    }
+
+    #[test]
+    fn test_parity_mixed_types() {
+        let data = b"(42,'text',3.14,NULL)";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], SqlValue::Int(42));
+        assert_eq!(rows[0][1], SqlValue::Str("text".to_string()));
+        match &rows[0][2] {
+            SqlValue::Float(f) => assert!((*f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
+        assert_eq!(rows[0][3], SqlValue::Null);
+    }
+
+    // === Cycle 9: SqlValue ergonomics ===
+
+    #[test]
+    fn test_sql_value_as_str() {
+        assert_eq!(SqlValue::Str("hello".to_string()).as_str(), Some("hello"));
+        assert_eq!(SqlValue::Null.as_str(), None);
+        assert_eq!(SqlValue::Int(42).as_str(), None);
+        assert_eq!(SqlValue::Float(1.0).as_str(), None);
+    }
+
+    #[test]
+    fn test_sql_value_as_i64() {
+        assert_eq!(SqlValue::Int(42).as_i64(), Some(42));
+        assert_eq!(SqlValue::Null.as_i64(), None);
+        assert_eq!(SqlValue::Str("x".to_string()).as_i64(), None);
+    }
+
+    #[test]
+    fn test_sql_value_as_f64() {
+        assert_eq!(SqlValue::Float(3.14).as_f64(), Some(3.14));
+        assert_eq!(SqlValue::Null.as_f64(), None);
+        assert_eq!(SqlValue::Int(42).as_f64(), None);
+    }
+
+    #[test]
+    fn test_sql_value_display() {
+        assert_eq!(format!("{}", SqlValue::Null), "NULL");
+        assert_eq!(format!("{}", SqlValue::Int(42)), "42");
+        assert_eq!(format!("{}", SqlValue::Float(3.14)), "3.14");
+        assert_eq!(format!("{}", SqlValue::Str("hello".to_string())), "'hello'");
+    }
+}
