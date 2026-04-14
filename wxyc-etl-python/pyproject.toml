@@ -12,3 +12,8 @@ dev = ["pytest>=7.0"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+markers = [
+    "perf: performance benchmarks (require release build)",
+]
