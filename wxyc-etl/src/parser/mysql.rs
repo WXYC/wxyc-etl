@@ -34,6 +34,28 @@ pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
     if *pos + 3 < len && &data[*pos..*pos + 4] == b"NULL" {
         *pos += 4;
         SqlValue::Null
+    }
+    // Number (int or float)
+    else if data[*pos].is_ascii_digit() || data[*pos] == b'-' || data[*pos] == b'+' {
+        let start = *pos;
+        let mut has_dot = false;
+        while *pos < len {
+            let ch = data[*pos];
+            if ch == b'.' {
+                has_dot = true;
+                *pos += 1;
+            } else if ch.is_ascii_digit() || ch == b'-' || ch == b'+' {
+                *pos += 1;
+            } else {
+                break;
+            }
+        }
+        let num_str = std::str::from_utf8(&data[start..*pos]).unwrap_or("0");
+        if has_dot {
+            SqlValue::Float(num_str.parse().unwrap_or(0.0))
+        } else {
+            SqlValue::Int(num_str.parse().unwrap_or(0))
+        }
     } else {
         todo!()
     }
@@ -86,5 +108,51 @@ mod tests {
         let val = parse_single_value(data, &mut pos);
         assert!(matches!(val, SqlValue::Null));
         assert_eq!(pos, 4);
+    }
+
+    // === Cycle 2: parse_single_value — integers and floats ===
+
+    #[test]
+    fn test_parse_int() {
+        let data = b"42,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, 42),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_negative_int() {
+        let data = b"-7,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, -7),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bigint() {
+        let data = b"1710000000000,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Int(n) => assert_eq!(n, 1710000000000),
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_float() {
+        let data = b"3.14,";
+        let mut pos = 0;
+        let val = parse_single_value(data, &mut pos);
+        match val {
+            SqlValue::Float(f) => assert!((f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
     }
 }
