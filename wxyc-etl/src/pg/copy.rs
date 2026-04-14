@@ -66,6 +66,14 @@ pub fn copy_line(values: &[Option<&str>]) -> String {
     line
 }
 
+/// Write an integer as a COPY TEXT column value directly into a byte buffer.
+///
+/// Uses [`itoa`] for zero-allocation integer formatting.
+pub fn write_copy_int(buf: &mut Vec<u8>, n: impl itoa::Integer) {
+    let mut itoa_buf = itoa::Buffer::new();
+    buf.extend_from_slice(itoa_buf.format(n).as_bytes());
+}
+
 /// Write a COPY TEXT row directly into a byte buffer.
 ///
 /// This is the zero-allocation counterpart of [`copy_line()`]. Values are
@@ -253,5 +261,35 @@ mod tests {
                 values,
             );
         }
+    }
+
+    // -- write_copy_int tests --
+
+    #[test]
+    fn test_write_copy_int_u64() {
+        let mut buf = Vec::new();
+        write_copy_int(&mut buf, 42u64);
+        assert_eq!(&buf, b"42");
+    }
+
+    #[test]
+    fn test_write_copy_int_negative() {
+        let mut buf = Vec::new();
+        write_copy_int(&mut buf, -7i32);
+        assert_eq!(&buf, b"-7");
+    }
+
+    #[test]
+    fn test_write_copy_int_zero() {
+        let mut buf = Vec::new();
+        write_copy_int(&mut buf, 0u32);
+        assert_eq!(&buf, b"0");
+    }
+
+    #[test]
+    fn test_write_copy_int_i16() {
+        let mut buf = Vec::new();
+        write_copy_int(&mut buf, 2001i16);
+        assert_eq!(&buf, b"2001");
     }
 }
