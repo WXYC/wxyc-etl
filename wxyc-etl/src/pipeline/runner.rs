@@ -7,8 +7,10 @@ use anyhow::Result;
 use crossbeam_channel::Receiver;
 use log::{info, warn};
 
-use super::processor::process_batch;
-use super::scanner::Batch;
+use std::collections::HashSet;
+
+use super::processor::{process_batch, process_byte_batch};
+use super::scanner::{Batch, ByteBatch};
 use super::writer::PipelineOutput;
 
 /// Accumulated statistics from a pipeline run.
@@ -98,6 +100,97 @@ where
         filtered,
         skipped: 0,
         duplicates: 0,
+    };
+    info!("{}", stats);
+    Ok(stats)
+}
+
+/// Optional deduplication configuration for byte pipelines.
+///
+/// Extracts an ID from raw bytes *before* the transform runs. If the ID
+/// has been seen, the item is skipped and counted as a duplicate.
+pub struct DedupConfig<'a, I: Fn(&[u8]) -> Option<u64>> {
+    /// Set of previously seen IDs.
+    pub seen_ids: &'a mut HashSet<u64>,
+    /// Extract an ID from the raw byte slice. Return `None` to skip the item.
+    pub id_fn: I,
+}
+
+/// Byte-batch pipeline variant with optional deduplication.
+///
+/// Like [`run_pipeline`] but operates on [`ByteBatch`]es. The transform
+/// receives raw byte slices and returns `Option<R>` (None to filter).
+/// When a [`DedupConfig`] is provided, IDs are extracted from raw bytes
+/// and duplicates are skipped before the transform runs.
+pub fn run_byte_pipeline<R, F, O, I>(
+    rx: Receiver<ByteBatch>,
+    handle: JoinHandle<Result<usize>>,
+    transform: F,
+    output: &mut O,
+    dedup: Option<DedupConfig<'_, I>>,
+) -> Result<PipelineStats>
+where
+    R: Send,
+    F: Fn(&[u8]) -> Option<R> + Sync + Send,
+    O: PipelineOutput<R>,
+    I: Fn(&[u8]) -> Option<u64>,
+{
+    let mut written = 0usize;
+    let mut filtered = 0usize;
+    let mut duplicates = 0usize;
+
+    // Unpack dedup config (borrow checker needs the Option to be destructured)
+    let mut dedup_state: Option<(&mut HashSet<u64>, &dyn Fn(&[u8]) -> Option<u64>)> =
+        None;
+    // We need to store the DedupConfig to keep id_fn alive
+    let mut dedup_cfg = dedup;
+    if let Some(ref mut cfg) = dedup_cfg {
+        dedup_state = Some((&mut *cfg.seen_ids, &cfg.id_fn));
+    }
+
+    let loop_result: Result<()> = (|| {
+        for batch in &rx {
+            let results: Vec<Option<R>> = process_byte_batch(&batch, &transform);
+
+            for (i, result) in results.into_iter().enumerate() {
+                match result {
+                    Some(item) => {
+                        if let Some((ref mut seen, id_fn)) = dedup_state {
+                            let bytes = batch.get(i);
+                            if let Some(id) = id_fn(bytes) {
+                                if !seen.insert(id) {
+                                    duplicates += 1;
+                                    continue;
+                                }
+                            }
+                        }
+                        output.write_item(&item)?;
+                        written += 1;
+                    }
+                    None => filtered += 1,
+                }
+            }
+        }
+
+        output.flush()?;
+        Ok(())
+    })();
+
+    drop(rx);
+
+    let scanner_result = handle.join().unwrap();
+    if let Err(ref e) = loop_result {
+        warn!("Byte pipeline processing failed: {}", e);
+        return Err(loop_result.unwrap_err());
+    }
+    let total = scanner_result?;
+
+    let stats = PipelineStats {
+        scanned: total,
+        written,
+        filtered,
+        skipped: 0,
+        duplicates,
     };
     info!("{}", stats);
     Ok(stats)
@@ -232,5 +325,113 @@ mod tests {
         };
         let display = format!("{}", stats);
         assert!(display.contains("3 duplicate"));
+    }
+
+    struct StringOutput {
+        items: Vec<String>,
+    }
+
+    impl StringOutput {
+        fn new() -> Self {
+            Self { items: Vec::new() }
+        }
+    }
+
+    impl PipelineOutput<String> for StringOutput {
+        fn write_item(&mut self, item: &String) -> Result<()> {
+            self.items.push(item.clone());
+            Ok(())
+        }
+
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn finish(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_run_byte_pipeline() {
+        use crate::pipeline::scanner::{start_byte_scanner, ByteBatch};
+
+        let config = BatchConfig {
+            batch_size: 2,
+            channel_capacity: 4,
+        };
+        let (rx, handle) = start_byte_scanner(
+            |tx| {
+                tx.send(ByteBatch::from_slices(&[b"hello", b"world"]))?;
+                tx.send(ByteBatch::from_slices(&[b"foo"]))?;
+                Ok(3)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let no_dedup: Option<DedupConfig<'_, fn(&[u8]) -> Option<u64>>> = None;
+        let stats = run_byte_pipeline(
+            rx,
+            handle,
+            |bytes| Some(String::from_utf8_lossy(bytes).to_uppercase()),
+            &mut output,
+            no_dedup,
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 3);
+        assert_eq!(stats.written, 3);
+        assert_eq!(output.items, vec!["HELLO", "WORLD", "FOO"]);
+    }
+
+    #[test]
+    fn test_run_byte_pipeline_with_dedup() {
+        use crate::pipeline::scanner::{start_byte_scanner, ByteBatch};
+        use std::collections::HashSet;
+
+        let config = BatchConfig {
+            batch_size: 10,
+            channel_capacity: 4,
+        };
+        let (rx, handle) = start_byte_scanner(
+            |tx| {
+                // "1:hello", "2:world", "1:hello-again" — ID 1 is duplicated
+                tx.send(ByteBatch::from_slices(&[
+                    b"1:hello",
+                    b"2:world",
+                    b"1:hello-again",
+                ]))?;
+                Ok(3)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let mut seen = HashSet::new();
+        let stats = run_byte_pipeline(
+            rx,
+            handle,
+            |bytes| {
+                let s = String::from_utf8_lossy(bytes);
+                let (_, val) = s.split_once(':')?;
+                Some(val.to_uppercase())
+            },
+            &mut output,
+            Some(DedupConfig {
+                seen_ids: &mut seen,
+                id_fn: |bytes| {
+                    let s = String::from_utf8_lossy(bytes);
+                    let (id, _) = s.split_once(':')?;
+                    id.parse().ok()
+                },
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 3);
+        assert_eq!(stats.written, 2);
+        assert_eq!(stats.duplicates, 1);
+        assert_eq!(output.items, vec!["HELLO", "WORLD"]);
     }
 }
