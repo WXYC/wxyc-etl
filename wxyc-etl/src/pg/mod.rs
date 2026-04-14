@@ -5,3 +5,4 @@
 //! bulk imports.
 
 pub mod copy;
+pub mod dedup;
