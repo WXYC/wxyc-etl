@@ -1,5 +1,5 @@
 [workspace]
-members = ["wxyc-etl", "wxyc-etl-python"]
+members = ["wxyc-etl"]
 resolver = "2"
 
 [workspace.package]
