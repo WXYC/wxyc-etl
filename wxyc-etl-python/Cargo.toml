@@ -1,0 +1,12 @@
+[package]
+name = "wxyc-etl-python"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "wxyc_etl"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+wxyc-etl = { path = "../wxyc-etl" }
