@@ -434,4 +434,248 @@ mod tests {
         assert_eq!(stats.duplicates, 1);
         assert_eq!(output.items, vec!["HELLO", "WORLD"]);
     }
+
+    // --- Integration tests: order preservation and realistic transforms ---
+
+    #[test]
+    fn test_pipeline_preserves_order_across_batches() {
+        // Verify that items are written in the exact order they were scanned,
+        // even when processed in parallel across multiple batches.
+        let config = BatchConfig {
+            batch_size: 3,
+            channel_capacity: 4,
+        };
+
+        let wxyc_artists = vec![
+            "Autechre", "Stereolab", "Cat Power", "Juana Molina",
+            "Jessica Pratt", "Chuquimamani-Condori", "Sessa", "Anne Gillis",
+            "Father John Misty", "Rafael Toral", "Buck Meek",
+        ];
+        let expected: Vec<String> = wxyc_artists
+            .iter()
+            .map(|s| s.to_uppercase())
+            .collect();
+
+        let (rx, handle) = start_scanner(
+            move |tx| {
+                let count = wxyc_artists.len();
+                for artist in wxyc_artists {
+                    tx.send_item(artist.to_string())?;
+                }
+                Ok(count)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let stats = run_pipeline(
+            rx,
+            handle,
+            |s: &String| Some(s.to_uppercase()),
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 11);
+        assert_eq!(stats.written, 11);
+        assert_eq!(stats.filtered, 0);
+        assert_eq!(output.items, expected, "items should be in scan order");
+    }
+
+    #[test]
+    fn test_pipeline_order_preserved_with_filtering() {
+        // Even with filtering, the remaining items should be in order
+        let config = BatchConfig {
+            batch_size: 2,
+            channel_capacity: 4,
+        };
+
+        // Send indices 0..10; keep only even ones
+        let (rx, handle) = start_scanner(
+            |tx| {
+                for i in 0..10u32 {
+                    tx.send_item(i)?;
+                }
+                Ok(10)
+            },
+            config,
+        );
+
+        let mut output = MockOutput::new();
+        let stats = run_pipeline(
+            rx,
+            handle,
+            |&x| if x % 2 == 0 { Some(x * 100) } else { None },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 10);
+        assert_eq!(stats.written, 5);
+        assert_eq!(stats.filtered, 5);
+        assert_eq!(output.items, vec![0, 200, 400, 600, 800]);
+    }
+
+    #[test]
+    fn test_pipeline_large_batch_order_preservation() {
+        // 1000 items across many small batches to stress-test order preservation
+        let n = 1000u32;
+        let config = BatchConfig {
+            batch_size: 7, // prime-sized batches for uneven splits
+            channel_capacity: 4,
+        };
+
+        let (rx, handle) = start_scanner(
+            move |tx| {
+                for i in 0..n {
+                    tx.send_item(i)?;
+                }
+                Ok(n as usize)
+            },
+            config,
+        );
+
+        let mut output = MockOutput::new();
+        let stats = run_pipeline(rx, handle, |&x| Some(x), &mut output).unwrap();
+
+        assert_eq!(stats.scanned, n as usize);
+        assert_eq!(stats.written, n as usize);
+
+        let expected: Vec<u32> = (0..n).collect();
+        assert_eq!(output.items, expected, "1000 items should arrive in order");
+    }
+
+    #[test]
+    fn test_pipeline_transform_type_conversion() {
+        // Transform from one type to another (u32 -> String)
+        let config = BatchConfig {
+            batch_size: 3,
+            channel_capacity: 4,
+        };
+
+        let artists = vec!["Autechre", "Stereolab", "Cat Power", "Sessa"];
+
+        let (rx, handle) = start_scanner(
+            move |tx| {
+                let count = artists.len();
+                for (i, artist) in artists.into_iter().enumerate() {
+                    tx.send_item((i as u32, artist.to_string()))?;
+                }
+                Ok(count)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let stats = run_pipeline(
+            rx,
+            handle,
+            |(id, name): &(u32, String)| Some(format!("{}:{}", id, name)),
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(stats.written, 4);
+        assert_eq!(output.items, vec![
+            "0:Autechre", "1:Stereolab", "2:Cat Power", "3:Sessa",
+        ]);
+    }
+
+    #[test]
+    fn test_byte_pipeline_order_preservation() {
+        use crate::pipeline::scanner::{start_byte_scanner, ByteBatch};
+
+        let config = BatchConfig {
+            batch_size: 2,
+            channel_capacity: 4,
+        };
+
+        let (rx, handle) = start_byte_scanner(
+            |tx| {
+                tx.send(ByteBatch::from_slices(&[
+                    b"Autechre", b"Stereolab",
+                ]))?;
+                tx.send(ByteBatch::from_slices(&[
+                    b"Cat Power", b"Juana Molina",
+                ]))?;
+                tx.send(ByteBatch::from_slices(&[
+                    b"Sessa",
+                ]))?;
+                Ok(5)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let no_dedup: Option<DedupConfig<'_, fn(&[u8]) -> Option<u64>>> = None;
+        let stats = run_byte_pipeline(
+            rx,
+            handle,
+            |bytes| Some(String::from_utf8_lossy(bytes).to_string()),
+            &mut output,
+            no_dedup,
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 5);
+        assert_eq!(stats.written, 5);
+        assert_eq!(
+            output.items,
+            vec!["Autechre", "Stereolab", "Cat Power", "Juana Molina", "Sessa"],
+        );
+    }
+
+    #[test]
+    fn test_byte_pipeline_filtering_and_dedup_combined() {
+        use crate::pipeline::scanner::{start_byte_scanner, ByteBatch};
+        use std::collections::HashSet;
+
+        let config = BatchConfig {
+            batch_size: 10,
+            channel_capacity: 4,
+        };
+
+        // Format: "id:artist" -- filter out entries without ':', dedup by ID
+        let (rx, handle) = start_byte_scanner(
+            |tx| {
+                tx.send(ByteBatch::from_slices(&[
+                    b"1:Autechre",
+                    b"2:Stereolab",
+                    b"bad-data",        // no colon -> transform returns None
+                    b"1:Autechre Dup",  // duplicate ID 1
+                    b"3:Cat Power",
+                ]))?;
+                Ok(5)
+            },
+            config,
+        );
+
+        let mut output = StringOutput::new();
+        let mut seen = HashSet::new();
+        let stats = run_byte_pipeline(
+            rx,
+            handle,
+            |bytes| {
+                let s = String::from_utf8_lossy(bytes);
+                let (_, name) = s.split_once(':')?;
+                Some(name.to_string())
+            },
+            &mut output,
+            Some(DedupConfig {
+                seen_ids: &mut seen,
+                id_fn: |bytes| {
+                    let s = String::from_utf8_lossy(bytes);
+                    let (id, _) = s.split_once(':')?;
+                    id.parse().ok()
+                },
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(stats.scanned, 5);
+        assert_eq!(stats.written, 3);     // Autechre, Stereolab, Cat Power
+        assert_eq!(stats.filtered, 1);    // bad-data
+        assert_eq!(stats.duplicates, 1);  // duplicate Autechre
+        assert_eq!(output.items, vec!["Autechre", "Stereolab", "Cat Power"]);
+    }
 }

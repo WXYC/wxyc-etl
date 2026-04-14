@@ -291,4 +291,177 @@ mod tests {
         assert_eq!(batches[1].get(0), b"third");
         assert_eq!(handle.join().unwrap().unwrap(), 3);
     }
+
+    // --- Integration tests: batch accumulation, flush on drop, backpressure ---
+
+    #[test]
+    fn test_batch_sender_flush_on_drop() {
+        // Items that don't fill a complete batch should still be sent when
+        // the BatchSender is dropped (flush on drop).
+        let (tx, rx) = crossbeam_channel::bounded::<Batch<String>>(4);
+        {
+            let mut sender = BatchSender::new(tx, 10); // batch_size=10
+            // Send only 3 items, below the batch threshold
+            sender.send_item("Autechre".to_string()).unwrap();
+            sender.send_item("Stereolab".to_string()).unwrap();
+            sender.send_item("Cat Power".to_string()).unwrap();
+            // sender drops here, triggering flush
+        }
+        let batches: Vec<Batch<String>> = rx.iter().collect();
+        assert_eq!(batches.len(), 1, "remaining items should be flushed on drop");
+        assert_eq!(batches[0].items.len(), 3);
+        assert_eq!(batches[0].items[0], "Autechre");
+        assert_eq!(batches[0].items[1], "Stereolab");
+        assert_eq!(batches[0].items[2], "Cat Power");
+    }
+
+    #[test]
+    fn test_batch_sender_no_flush_when_empty() {
+        // Dropping a BatchSender with no pending items should not send a batch
+        let (tx, rx) = crossbeam_channel::bounded::<Batch<u32>>(4);
+        {
+            let _sender = BatchSender::new(tx, 10);
+            // no items sent, sender drops here
+        }
+        let batches: Vec<Batch<u32>> = rx.iter().collect();
+        assert!(batches.is_empty(), "empty sender should not flush a batch");
+    }
+
+    #[test]
+    fn test_batch_sender_multiple_full_batches_plus_remainder() {
+        // Verifies batch accumulation across multiple full batches with a remainder
+        let (tx, rx) = crossbeam_channel::bounded::<Batch<u32>>(10);
+        {
+            let mut sender = BatchSender::new(tx, 4);
+            // Send 11 items: 4 + 4 + 3
+            for i in 0..11u32 {
+                sender.send_item(i).unwrap();
+            }
+        }
+        let batches: Vec<Batch<u32>> = rx.iter().collect();
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].items, vec![0, 1, 2, 3]);
+        assert_eq!(batches[1].items, vec![4, 5, 6, 7]);
+        assert_eq!(batches[2].items, vec![8, 9, 10]);
+    }
+
+    #[test]
+    fn test_batch_sender_single_item_batch() {
+        // batch_size=1 should send each item as its own batch
+        let (tx, rx) = crossbeam_channel::bounded::<Batch<&str>>(10);
+        {
+            let mut sender = BatchSender::new(tx, 1);
+            sender.send_item("Juana Molina").unwrap();
+            sender.send_item("Sessa").unwrap();
+            sender.send_item("Anne Gillis").unwrap();
+        }
+        let batches: Vec<Batch<&str>> = rx.iter().collect();
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].items, vec!["Juana Molina"]);
+        assert_eq!(batches[1].items, vec!["Sessa"]);
+        assert_eq!(batches[2].items, vec!["Anne Gillis"]);
+    }
+
+    #[test]
+    fn test_channel_backpressure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // With channel_capacity=1, the producer should block after the first
+        // batch until the consumer reads it
+        let sent_count = Arc::new(AtomicUsize::new(0));
+        let sent_clone = sent_count.clone();
+
+        let config = BatchConfig {
+            batch_size: 2,
+            channel_capacity: 1,
+        };
+
+        let (rx, handle) = start_scanner(
+            move |tx| {
+                for i in 0..10u32 {
+                    tx.send_item(i)?;
+                    sent_clone.store((i + 1) as usize, Ordering::SeqCst);
+                }
+                Ok(10)
+            },
+            config,
+        );
+
+        // Consume all batches
+        let mut total_items = 0usize;
+        for batch in rx.iter() {
+            total_items += batch.items.len();
+        }
+        assert_eq!(total_items, 10);
+        assert_eq!(handle.join().unwrap().unwrap(), 10);
+        assert_eq!(sent_count.load(Ordering::SeqCst), 10);
+    }
+
+    #[test]
+    fn test_byte_batch_empty() {
+        let batch = ByteBatch::new();
+        assert!(batch.is_empty());
+        assert_eq!(batch.len(), 0);
+    }
+
+    #[test]
+    fn test_byte_batch_from_slices() {
+        let wxyc_data: Vec<&[u8]> = vec![
+            b"Autechre\tConfield",
+            b"Stereolab\tAluminum Tunes",
+            b"Cat Power\tMoon Pix",
+        ];
+        let batch = ByteBatch::from_slices(&wxyc_data);
+        assert_eq!(batch.len(), 3);
+        assert!(!batch.is_empty());
+        assert_eq!(batch.get(0), b"Autechre\tConfield");
+        assert_eq!(batch.get(1), b"Stereolab\tAluminum Tunes");
+        assert_eq!(batch.get(2), b"Cat Power\tMoon Pix");
+    }
+
+    #[test]
+    fn test_byte_batch_contiguous_buffer() {
+        // Verify that all items share the same contiguous buffer
+        let mut batch = ByteBatch::new();
+        batch.push_slice(b"Juana Molina");
+        batch.push_slice(b"DOGA");
+
+        // Offsets should be contiguous
+        assert_eq!(batch.offsets[0], (0, 12));  // "Juana Molina" = 12 bytes
+        assert_eq!(batch.offsets[1], (12, 16)); // "DOGA" = 4 bytes
+        assert_eq!(batch.data.len(), 16);
+    }
+
+    #[test]
+    fn test_start_scanner_preserves_item_order() {
+        // Verify that items come out in the same order they were sent,
+        // across multiple batches
+        let config = BatchConfig {
+            batch_size: 3,
+            channel_capacity: 4,
+        };
+        let wxyc_artists = vec![
+            "Autechre", "Stereolab", "Cat Power", "Juana Molina",
+            "Jessica Pratt", "Chuquimamani-Condori", "Sessa", "Anne Gillis",
+        ];
+        let expected: Vec<String> = wxyc_artists.iter().map(|s| s.to_string()).collect();
+
+        let (rx, handle) = start_scanner(
+            move |tx| {
+                for artist in &wxyc_artists {
+                    tx.send_item(artist.to_string())?;
+                }
+                Ok(wxyc_artists.len())
+            },
+            config,
+        );
+
+        let mut received: Vec<String> = Vec::new();
+        for batch in rx.iter() {
+            received.extend(batch.items);
+        }
+        assert_eq!(received, expected, "items should arrive in send order");
+        assert_eq!(handle.join().unwrap().unwrap(), 8);
+    }
 }

@@ -411,4 +411,227 @@ mod tests {
             "expected Review or Prune, got {:?}", result
         );
     }
+
+    // --- Integration tests: full WXYC example data index ---
+
+    /// Build a richer index from the canonical WXYC example data for
+    /// integration-level classification tests.
+    fn build_wxyc_index() -> LibraryIndex {
+        let pairs = vec![
+            ("Autechre".to_string(), "Confield".to_string()),
+            ("Prince Jammy".to_string(), "...Destroys The Space Invaders".to_string()),
+            ("Juana Molina".to_string(), "DOGA".to_string()),
+            ("Stereolab".to_string(), "Aluminum Tunes".to_string()),
+            ("Cat Power".to_string(), "Moon Pix".to_string()),
+            ("Jessica Pratt".to_string(), "On Your Own Love Again".to_string()),
+            ("Chuquimamani-Condori".to_string(), "Edits".to_string()),
+            ("Duke Ellington & John Coltrane".to_string(), "Duke Ellington & John Coltrane".to_string()),
+            ("Sessa".to_string(), "Pequena Vertigem de Amor".to_string()),
+            ("Anne Gillis".to_string(), "Eyry".to_string()),
+            ("Father John Misty".to_string(), "I Love You, Honeybear".to_string()),
+            ("Rafael Toral".to_string(), "Traveling Light".to_string()),
+            ("Buck Meek".to_string(), "Gasoline".to_string()),
+            ("Nourished by Time".to_string(), "The Passionate Ones".to_string()),
+            ("For Tracy Hyde".to_string(), "Hotel Insomnia".to_string()),
+            ("Rochelle Jordan".to_string(), "Through the Wall".to_string()),
+            ("Large Professor".to_string(), "1st Class".to_string()),
+        ];
+        LibraryIndex::from_pairs(&pairs)
+    }
+
+    #[test]
+    fn test_classify_wxyc_exact_matches() {
+        let index = build_wxyc_index();
+        let config = ClassifyConfig::default();
+
+        // All canonical entries should classify as KEEP via exact match
+        let cases = [
+            ("autechre", "confield"),
+            ("juana molina", "doga"),
+            ("stereolab", "aluminum tunes"),
+            ("cat power", "moon pix"),
+            ("jessica pratt", "on your own love again"),
+            ("chuquimamani-condori", "edits"),
+            ("sessa", "pequena vertigem de amor"),
+            ("anne gillis", "eyry"),
+            ("buck meek", "gasoline"),
+            ("large professor", "1st class"),
+        ];
+        for (artist, title) in &cases {
+            assert_eq!(
+                classify_release(artist, title, &index, &config),
+                Classification::Keep,
+                "expected KEEP for ({}, {})",
+                artist,
+                title,
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_wxyc_unknown_is_not_keep() {
+        let index = build_wxyc_index();
+        let config = ClassifyConfig::default();
+
+        // Completely unknown artists/titles should never be KEEP
+        let cases = [
+            ("nonexistent band", "fake album"),
+            ("zzzzz", "qqqqq"),
+            ("xylophone ensemble", "debut"),
+        ];
+        for (artist, title) in &cases {
+            assert_ne!(
+                classify_release(artist, title, &index, &config),
+                Classification::Keep,
+                "expected NOT KEEP for ({}, {})",
+                artist,
+                title,
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_wxyc_fuzzy_close_match() {
+        // Slight misspellings should still classify as KEEP due to fuzzy scoring
+        let index = build_wxyc_index();
+        let config = ClassifyConfig::default();
+
+        let result = classify_release("stereolab", "aluminium tunes", &index, &config);
+        assert_eq!(
+            result,
+            Classification::Keep,
+            "slight misspelling of 'Aluminum Tunes' should be KEEP",
+        );
+    }
+
+    #[test]
+    fn test_classify_right_artist_wrong_title_is_review() {
+        // Right artist but wrong title: should be REVIEW (scorers disagree)
+        let index = build_wxyc_index();
+        let config = ClassifyConfig::default();
+
+        let result = classify_release("autechre", "tri repetae", &index, &config);
+        // Autechre matches the artist stage, but "tri repetae" doesn't match
+        // "confield" — the scorers should disagree, landing in REVIEW
+        assert!(
+            matches!(result, Classification::Review | Classification::Prune),
+            "expected REVIEW or PRUNE for known artist / unknown title, got {:?}",
+            result,
+        );
+    }
+
+    #[test]
+    fn test_classify_config_strict_thresholds() {
+        // Raising thresholds makes fuzzy matches harder to achieve
+        let index = build_wxyc_index();
+        let strict_config = ClassifyConfig {
+            token_set_threshold: 0.95,
+            token_sort_threshold: 0.95,
+            two_stage_threshold: 0.95,
+            artist_threshold: 0.9,
+            prune_ceiling: 0.4,
+        };
+
+        // Exact match should still be KEEP (bypasses fuzzy scoring)
+        assert_eq!(
+            classify_release("autechre", "confield", &index, &strict_config),
+            Classification::Keep,
+        );
+
+        // A moderately different title with strict thresholds should no longer
+        // be KEEP. "cat power" / "moon pics remix" is close but not close enough
+        // for 0.95 thresholds on all three scorers.
+        let result = classify_release("cat power", "moon pics remix", &index, &strict_config);
+        assert_ne!(
+            result,
+            Classification::Keep,
+            "strict thresholds should reject moderately different title",
+        );
+    }
+
+    #[test]
+    fn test_classify_config_lenient_thresholds() {
+        // Lowering thresholds makes more items classify as KEEP
+        let index = build_wxyc_index();
+        let lenient_config = ClassifyConfig {
+            token_set_threshold: 0.5,
+            token_sort_threshold: 0.5,
+            two_stage_threshold: 0.5,
+            artist_threshold: 0.5,
+            prune_ceiling: 0.2,
+        };
+
+        // Even a somewhat different title should now pass
+        let result = classify_release("cat power", "moon pics", &index, &lenient_config);
+        assert_eq!(
+            result,
+            Classification::Keep,
+            "lenient thresholds should KEEP close misspelling",
+        );
+    }
+
+    #[test]
+    fn test_three_scorer_agreement_all_keep() {
+        // When all three scorers agree above threshold: KEEP
+        let index = build_wxyc_index();
+        let config = ClassifyConfig::default();
+
+        // Exact match trivially satisfies all scorers
+        let ts = score_token_set("autechre", "confield", &index);
+        let tr = score_token_sort("autechre", "confield", &index);
+        let tw = score_two_stage("autechre", "confield", &index, config.artist_threshold);
+
+        // All should be high for an exact-match entry
+        assert!(ts > 0.7, "token_set should be high, got {}", ts);
+        assert!(tr > 0.7, "token_sort should be high, got {}", tr);
+        assert!(tw > 0.7, "two_stage should be high, got {}", tw);
+    }
+
+    #[test]
+    fn test_three_scorer_agreement_all_low() {
+        // When all three scorers produce low scores: PRUNE (with raised ceiling)
+        let index = build_wxyc_index();
+
+        let ts = score_token_set("zzzzz", "qqqqq", &index);
+        let tr = score_token_sort("zzzzz", "qqqqq", &index);
+        let tw = score_two_stage("zzzzz", "qqqqq", &index, 0.7);
+
+        // All should be very low for completely unrelated strings
+        assert!(ts < 0.4, "token_set should be low, got {}", ts);
+        assert!(tr < 0.4, "token_sort should be low, got {}", tr);
+        assert!(tw < 0.4, "two_stage should be low, got {}", tw);
+    }
+
+    #[test]
+    fn test_scorer_individual_token_set() {
+        // token_set_ratio-based scorer rewards shared tokens
+        let index = build_wxyc_index();
+
+        // "duke ellington" shares tokens with the combined string for
+        // "duke ellington & john coltrane ||| duke ellington & john coltrane"
+        let score = score_token_set("duke ellington", "duke ellington", &index);
+        assert!(score > 0.7, "shared tokens should produce high score, got {}", score);
+    }
+
+    #[test]
+    fn test_scorer_individual_two_stage() {
+        // two_stage scorer: artist match first, then title match
+        let index = build_wxyc_index();
+
+        // Good artist + good title
+        let score_good = score_two_stage("jessica pratt", "on your own love again", &index, 0.7);
+        assert!(score_good > 0.9, "exact artist+title should score high, got {}", score_good);
+
+        // Good artist + bad title
+        let score_bad_title = score_two_stage("jessica pratt", "nonexistent album", &index, 0.7);
+        assert!(
+            score_bad_title < score_good,
+            "bad title should score lower than good title: {} vs {}",
+            score_bad_title, score_good,
+        );
+
+        // Bad artist (below artist_threshold) returns 0.0
+        let score_bad_artist = score_two_stage("zzzzz", "confield", &index, 0.7);
+        assert_eq!(score_bad_artist, 0.0, "bad artist should produce 0.0");
+    }
 }
