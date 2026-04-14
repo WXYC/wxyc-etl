@@ -23,6 +23,43 @@ pub enum SqlValue {
     Str(String),
 }
 
+impl SqlValue {
+    /// Returns the string contents if this is a `Str` variant.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            SqlValue::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the integer value if this is an `Int` variant.
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            SqlValue::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Returns the float value if this is a `Float` variant.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            SqlValue::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for SqlValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SqlValue::Null => write!(f, "NULL"),
+            SqlValue::Int(n) => write!(f, "{n}"),
+            SqlValue::Float(v) => write!(f, "{v}"),
+            SqlValue::Str(s) => write!(f, "'{s}'"),
+        }
+    }
+}
+
 /// Parse a single SQL value starting at position `pos`, advancing `pos` past the value.
 pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
     let len = data.len();
@@ -756,5 +793,37 @@ mod tests {
             other => panic!("expected Float, got {other:?}"),
         }
         assert_eq!(rows[0][3], SqlValue::Null);
+    }
+
+    // === Cycle 9: SqlValue ergonomics ===
+
+    #[test]
+    fn test_sql_value_as_str() {
+        assert_eq!(SqlValue::Str("hello".to_string()).as_str(), Some("hello"));
+        assert_eq!(SqlValue::Null.as_str(), None);
+        assert_eq!(SqlValue::Int(42).as_str(), None);
+        assert_eq!(SqlValue::Float(1.0).as_str(), None);
+    }
+
+    #[test]
+    fn test_sql_value_as_i64() {
+        assert_eq!(SqlValue::Int(42).as_i64(), Some(42));
+        assert_eq!(SqlValue::Null.as_i64(), None);
+        assert_eq!(SqlValue::Str("x".to_string()).as_i64(), None);
+    }
+
+    #[test]
+    fn test_sql_value_as_f64() {
+        assert_eq!(SqlValue::Float(3.14).as_f64(), Some(3.14));
+        assert_eq!(SqlValue::Null.as_f64(), None);
+        assert_eq!(SqlValue::Int(42).as_f64(), None);
+    }
+
+    #[test]
+    fn test_sql_value_display() {
+        assert_eq!(format!("{}", SqlValue::Null), "NULL");
+        assert_eq!(format!("{}", SqlValue::Int(42)), "42");
+        assert_eq!(format!("{}", SqlValue::Float(3.14)), "3.14");
+        assert_eq!(format!("{}", SqlValue::Str("hello".to_string())), "'hello'");
     }
 }
