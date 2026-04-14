@@ -237,11 +237,21 @@ where
 /// instead of collecting all rows into memory.
 ///
 /// Returns the number of rows processed.
-pub fn iter_table_rows<F>(path: &Path, table_name: &str, callback: F) -> Result<usize>
+pub fn iter_table_rows<F>(path: &Path, table_name: &str, mut callback: F) -> Result<usize>
 where
     F: FnMut(Vec<SqlValue>),
 {
-    todo!()
+    let mut count = 0;
+    scan_table_lines(path, table_name, |line| {
+        if let Some(values_offset) = find_values_start(line) {
+            let rows = parse_sql_values(&line[values_offset..]);
+            for row in rows {
+                callback(row);
+                count += 1;
+            }
+        }
+    })?;
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -538,5 +548,49 @@ mod tests {
 
         let rows = load_table_rows(&path, "GENRE").unwrap();
         assert!(rows.is_empty());
+    }
+
+    // === Cycle 7: iter_table_rows — streaming callback ===
+
+    #[test]
+    fn test_iter_table_rows_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `data` VALUES (1,'a'),(2,'b'),(3,'c');\n",
+        )
+        .unwrap();
+
+        let mut collected = Vec::new();
+        let count = iter_table_rows(&path, "data", |row| {
+            collected.push(row);
+        })
+        .unwrap();
+
+        assert_eq!(count, 3);
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0][0], SqlValue::Int(1));
+        assert_eq!(collected[2][0], SqlValue::Int(3));
+    }
+
+    #[test]
+    fn test_iter_table_rows_filters_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sql");
+        std::fs::write(
+            &path,
+            "INSERT INTO `wanted` VALUES (1,'yes');\nINSERT INTO `other` VALUES (2,'no');\n",
+        )
+        .unwrap();
+
+        let mut count_seen = 0;
+        let count = iter_table_rows(&path, "wanted", |_row| {
+            count_seen += 1;
+        })
+        .unwrap();
+
+        assert_eq!(count, 1);
+        assert_eq!(count_seen, 1);
     }
 }
