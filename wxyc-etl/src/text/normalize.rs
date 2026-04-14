@@ -139,6 +139,28 @@ mod tests {
         assert_eq!(normalize_artist_name("Zoé  "), "zoe");
     }
 
+    // --- strip_diacritics: preserves case and whitespace ---
+
+    #[test]
+    fn test_strip_diacritics_preserves_case() {
+        assert_eq!(strip_diacritics("Björk"), "Bjork");
+    }
+
+    #[test]
+    fn test_strip_diacritics_preserves_whitespace() {
+        assert_eq!(strip_diacritics("  Café  "), "  Cafe  ");
+    }
+
+    #[test]
+    fn test_strip_diacritics_no_change() {
+        assert_eq!(strip_diacritics("Radiohead"), "Radiohead");
+    }
+
+    #[test]
+    fn test_strip_diacritics_empty() {
+        assert_eq!(strip_diacritics(""), "");
+    }
+
     // --- normalize_title delegates to same logic ---
 
     #[test]
