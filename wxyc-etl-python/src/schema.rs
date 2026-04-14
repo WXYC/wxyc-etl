@@ -18,6 +18,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("RELEASE_GENRE_TABLE", discogs::RELEASE_GENRE_TABLE)?;
     m.add("RELEASE_STYLE_TABLE", discogs::RELEASE_STYLE_TABLE)?;
     m.add("RELEASE_TRACK_TABLE", discogs::RELEASE_TRACK_TABLE)?;
+    m.add("RELEASE_TRACK_ARTIST_TABLE", discogs::RELEASE_TRACK_ARTIST_TABLE)?;
     m.add("ARTIST_TABLE", discogs::ARTIST_TABLE)?;
     m.add("ARTIST_ALIAS_TABLE", discogs::ARTIST_ALIAS_TABLE)?;
     m.add("CACHE_METADATA_TABLE", discogs::CACHE_METADATA_TABLE)?;
