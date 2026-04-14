@@ -98,7 +98,59 @@ pub fn parse_single_value(data: &[u8], pos: &mut usize) -> SqlValue {
 ///
 /// `data` should start at the first `(` of the VALUES clause.
 pub fn parse_sql_values(data: &[u8]) -> Vec<Vec<SqlValue>> {
-    todo!()
+    let mut rows = Vec::new();
+    let mut i = 0;
+    let len = data.len();
+
+    while i < len {
+        // Skip to opening paren
+        while i < len && data[i] != b'(' {
+            if data[i] == b';' {
+                return rows;
+            }
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+        i += 1; // skip '('
+
+        let mut row = Vec::new();
+
+        loop {
+            // Skip whitespace
+            while i < len && data[i] == b' ' {
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+
+            if data[i] == b')' {
+                i += 1;
+                break;
+            }
+
+            if data[i] == b',' && row.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            let val = parse_single_value(data, &mut i);
+            row.push(val);
+
+            // Skip comma between values
+            if i < len && data[i] == b',' {
+                i += 1;
+            }
+        }
+
+        if !row.is_empty() {
+            rows.push(row);
+        }
+    }
+
+    rows
 }
 
 /// Find the byte offset of the first `(` after the VALUES keyword in an INSERT line.
@@ -277,5 +329,42 @@ mod tests {
             SqlValue::Str(s) => assert_eq!(s, "(remix)"),
             other => panic!("expected Str, got {other:?}"),
         }
+    }
+
+    // === Cycle 4: parse_sql_values — full VALUES parsing ===
+
+    #[test]
+    fn test_parse_values_single_row() {
+        let data = b"(1,'hello',NULL)";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[0][1], SqlValue::Str("hello".to_string()));
+        assert_eq!(rows[0][2], SqlValue::Null);
+    }
+
+    #[test]
+    fn test_parse_values_multiple_rows() {
+        let data = b"(1,'a'),(2,'b'),(3,'c')";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        assert_eq!(rows[1][0], SqlValue::Int(2));
+        assert_eq!(rows[2][0], SqlValue::Int(3));
+    }
+
+    #[test]
+    fn test_parse_values_with_semicolon() {
+        let data = b"(1,'hello');";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_values_empty() {
+        let data = b"";
+        let rows = parse_sql_values(data);
+        assert!(rows.is_empty());
     }
 }
