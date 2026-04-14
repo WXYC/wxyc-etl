@@ -2,7 +2,7 @@
 
 use rayon::prelude::*;
 
-use super::scanner::Batch;
+use super::scanner::{Batch, ByteBatch};
 
 /// Apply `transform` to each item in the batch via rayon, preserving order.
 pub fn process_batch<T, R, F>(batch: &Batch<T>, transform: F) -> Vec<R>
@@ -12,6 +12,19 @@ where
     F: Fn(&T) -> R + Sync + Send,
 {
     batch.items.par_iter().map(transform).collect()
+}
+
+/// Apply `transform` to each byte slice in a [`ByteBatch`] via rayon, preserving order.
+pub fn process_byte_batch<R, F>(batch: &ByteBatch, transform: F) -> Vec<R>
+where
+    R: Send,
+    F: Fn(&[u8]) -> R + Sync + Send,
+{
+    batch
+        .offsets
+        .par_iter()
+        .map(|&(start, end)| transform(&batch.data[start..end]))
+        .collect()
 }
 
 #[cfg(test)]
@@ -42,5 +55,27 @@ mod tests {
         };
         let results = process_batch(&batch, |&x| format!("item-{}", x));
         assert_eq!(results, vec!["item-1", "item-2", "item-3"]);
+    }
+
+    #[test]
+    fn test_process_byte_batch() {
+        use crate::pipeline::scanner::ByteBatch;
+
+        let batch = ByteBatch::from_slices(&[b"hello", b"world"]);
+        let results = process_byte_batch(&batch, |bytes| {
+            String::from_utf8_lossy(bytes).to_uppercase()
+        });
+        assert_eq!(results, vec!["HELLO", "WORLD"]);
+    }
+
+    #[test]
+    fn test_process_byte_batch_empty() {
+        use crate::pipeline::scanner::ByteBatch;
+
+        let batch = ByteBatch::new();
+        let results: Vec<String> = process_byte_batch(&batch, |bytes| {
+            String::from_utf8_lossy(bytes).to_string()
+        });
+        assert!(results.is_empty());
     }
 }
