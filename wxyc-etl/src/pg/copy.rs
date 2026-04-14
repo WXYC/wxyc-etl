@@ -66,6 +66,27 @@ pub fn copy_line(values: &[Option<&str>]) -> String {
     line
 }
 
+/// Trait for accessing image type and URI from different image structs.
+///
+/// This allows [`pick_artwork_url()`] to be generic over different
+/// release image representations.
+pub trait ImageRef {
+    fn image_type(&self) -> &str;
+    fn uri(&self) -> &str;
+}
+
+/// Pick the best artwork URL from a slice of images.
+///
+/// Prefers the first "primary" image; falls back to the first image of any type.
+/// Returns `None` if the slice is empty.
+pub fn pick_artwork_url<I: ImageRef>(images: &[I]) -> Option<&str> {
+    let primary = images
+        .iter()
+        .find(|img| img.image_type() == "primary")
+        .map(|img| img.uri());
+    primary.or_else(|| images.first().map(|img| img.uri()))
+}
+
 /// Extract a 4-digit year from a Discogs "released" field.
 ///
 /// Accepts formats like "1997-06-16" or "1997". Returns `None` if the
@@ -356,5 +377,57 @@ mod tests {
     #[test]
     fn test_empty_to_none_non_empty() {
         assert_eq!(empty_to_none("hello"), Some("hello"));
+    }
+
+    // -- pick_artwork_url tests --
+
+    struct TestImage {
+        image_type: &'static str,
+        uri: &'static str,
+    }
+
+    impl ImageRef for TestImage {
+        fn image_type(&self) -> &str {
+            self.image_type
+        }
+        fn uri(&self) -> &str {
+            self.uri
+        }
+    }
+
+    #[test]
+    fn test_pick_artwork_prefers_primary() {
+        let images = vec![
+            TestImage {
+                image_type: "secondary",
+                uri: "https://img.discogs.com/secondary.jpg",
+            },
+            TestImage {
+                image_type: "primary",
+                uri: "https://img.discogs.com/primary.jpg",
+            },
+        ];
+        assert_eq!(
+            pick_artwork_url(&images),
+            Some("https://img.discogs.com/primary.jpg")
+        );
+    }
+
+    #[test]
+    fn test_pick_artwork_falls_back_to_first() {
+        let images = vec![TestImage {
+            image_type: "secondary",
+            uri: "https://img.discogs.com/first.jpg",
+        }];
+        assert_eq!(
+            pick_artwork_url(&images),
+            Some("https://img.discogs.com/first.jpg")
+        );
+    }
+
+    #[test]
+    fn test_pick_artwork_empty() {
+        let images: Vec<TestImage> = vec![];
+        assert_eq!(pick_artwork_url(&images), None);
     }
 }
