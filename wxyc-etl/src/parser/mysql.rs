@@ -157,7 +157,19 @@ pub fn parse_sql_values(data: &[u8]) -> Vec<Vec<SqlValue>> {
 ///
 /// Returns `None` if the line does not contain a VALUES clause.
 pub fn find_values_start(line: &[u8]) -> Option<usize> {
-    todo!()
+    // Case-insensitive scan for "VALUES"
+    let upper: Vec<u8> = line.iter().map(|b| b.to_ascii_uppercase()).collect();
+    let pos = upper
+        .windows(6)
+        .position(|w| w == b"VALUES")?;
+    // Find the first '(' after VALUES
+    let after_values = pos + 6;
+    for j in after_values..line.len() {
+        if line[j] == b'(' {
+            return Some(j);
+        }
+    }
+    None
 }
 
 /// Load all rows for a given table from a MySQL dump file.
@@ -366,5 +378,39 @@ mod tests {
         let data = b"";
         let rows = parse_sql_values(data);
         assert!(rows.is_empty());
+    }
+
+    // === Cycle 5: find_values_start ===
+
+    #[test]
+    fn test_find_values_start_basic() {
+        let line = b"INSERT INTO `table` VALUES (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+        assert_eq!(line[offset.unwrap()], b'(');
+    }
+
+    #[test]
+    fn test_find_values_start_with_columns() {
+        let line = b"INSERT INTO `table` (`col1`, `col2`) VALUES (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+        // The '(' should be the one after VALUES, not the column list paren
+        let data_after = &line[offset.unwrap()..];
+        assert!(data_after.starts_with(b"(1,"));
+    }
+
+    #[test]
+    fn test_find_values_start_case_insensitive() {
+        let line = b"INSERT INTO `table` values (1,'a')";
+        let offset = find_values_start(line);
+        assert!(offset.is_some());
+    }
+
+    #[test]
+    fn test_find_values_start_no_values() {
+        let line = b"CREATE TABLE `table` (id int)";
+        let offset = find_values_start(line);
+        assert!(offset.is_none());
     }
 }
