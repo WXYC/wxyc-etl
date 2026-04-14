@@ -87,7 +87,18 @@ where
     // Drop receiver so scanner's send() unblocks, preventing deadlock.
     drop(rx);
 
-    let scanner_result = handle.join().unwrap();
+    let scanner_result = handle
+        .join()
+        .map_err(|panic_payload| {
+            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                format!("scanner thread panicked: {}", s)
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                format!("scanner thread panicked: {}", s)
+            } else {
+                "scanner thread panicked (unknown payload)".to_string()
+            };
+            anyhow::anyhow!(msg)
+        })?;
     if let Err(ref e) = loop_result {
         warn!("Pipeline processing failed: {}", e);
         return Err(loop_result.unwrap_err());
@@ -178,7 +189,18 @@ where
 
     drop(rx);
 
-    let scanner_result = handle.join().unwrap();
+    let scanner_result = handle
+        .join()
+        .map_err(|panic_payload| {
+            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                format!("scanner thread panicked: {}", s)
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                format!("scanner thread panicked: {}", s)
+            } else {
+                "scanner thread panicked (unknown payload)".to_string()
+            };
+            anyhow::anyhow!(msg)
+        })?;
     if let Err(ref e) = loop_result {
         warn!("Byte pipeline processing failed: {}", e);
         return Err(loop_result.unwrap_err());
