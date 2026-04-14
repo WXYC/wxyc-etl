@@ -593,4 +593,168 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(count_seen, 1);
     }
+
+    // === Cycle 8: Python parity tests ===
+    // These mirror the edge cases from semantic-index/tests/unit/test_sql_parser.py
+
+    /// Helper: parse a full INSERT line via find_values_start + parse_sql_values,
+    /// matching the behavior of the Python parse_sql_values() which takes a full line.
+    fn parse_insert_line(line: &[u8]) -> Vec<Vec<SqlValue>> {
+        match find_values_start(line) {
+            Some(offset) => parse_sql_values(&line[offset..]),
+            None => vec![],
+        }
+    }
+
+    #[test]
+    fn test_parity_single_row_with_ints() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,2,3);");
+        assert_eq!(rows, vec![vec![SqlValue::Int(1), SqlValue::Int(2), SqlValue::Int(3)]]);
+    }
+
+    #[test]
+    fn test_parity_single_row_with_strings() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'hello','world');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("hello".to_string()),
+                SqlValue::Str("world".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_multiple_rows() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'a'),(2,'b'),(3,'c');");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], vec![SqlValue::Int(1), SqlValue::Str("a".to_string())]);
+        assert_eq!(rows[2], vec![SqlValue::Int(3), SqlValue::Str("c".to_string())]);
+    }
+
+    #[test]
+    fn test_parity_null_values() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,NULL,'text',NULL);");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Null,
+                SqlValue::Str("text".to_string()),
+                SqlValue::Null,
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_escaped_single_quote() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'HONEST JON\\'S/ASTRALWERKS');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("HONEST JON'S/ASTRALWERKS".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_escaped_backslash() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'back\\\\slash');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("back\\slash".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_empty_string() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'','notempty');");
+        assert_eq!(
+            rows,
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("".to_string()),
+                SqlValue::Str("notempty".to_string()),
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_parity_float_value() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,3.14,'pi');");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], SqlValue::Int(1));
+        match &rows[0][1] {
+            SqlValue::Float(f) => assert!((*f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
+        assert_eq!(rows[0][2], SqlValue::Str("pi".to_string()));
+    }
+
+    #[test]
+    fn test_parity_negative_int() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (-1,'neg');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(-1), SqlValue::Str("neg".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_with_column_list() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` (`id`, `name`) VALUES (1,'bar');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("bar".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_no_values_returns_empty() {
+        let rows = parse_insert_line(b"CREATE TABLE `FOO` (id INT);");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_parity_string_with_comma() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'hello, world');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("hello, world".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_string_with_parentheses() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'(remix)');");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Str("(remix)".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_parity_bigint_value() {
+        let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,1710000000000);");
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Int(1710000000000)]]
+        );
+    }
+
+    #[test]
+    fn test_parity_mixed_types() {
+        let data = b"(42,'text',3.14,NULL)";
+        let rows = parse_sql_values(data);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], SqlValue::Int(42));
+        assert_eq!(rows[0][1], SqlValue::Str("text".to_string()));
+        match &rows[0][2] {
+            SqlValue::Float(f) => assert!((*f - 3.14).abs() < 0.001),
+            other => panic!("expected Float, got {other:?}"),
+        }
+        assert_eq!(rows[0][3], SqlValue::Null);
+    }
 }
