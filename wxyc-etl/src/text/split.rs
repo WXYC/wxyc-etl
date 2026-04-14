@@ -307,4 +307,96 @@ mod tests {
     fn test_1000_homo_djs() {
         assert_eq!(split_artist_name("1,000 Homo DJs"), None);
     }
+
+    // --- split_artist_name_contextual ---
+
+    #[test]
+    fn test_contextual_ampersand_with_known_artist() {
+        let known: HashSet<String> = ["duke ellington"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Duke Ellington & John Coltrane", &known),
+            Some(vec!["Duke Ellington".into(), "John Coltrane".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_ampersand_without_known_artist() {
+        let known: HashSet<String> = HashSet::new();
+        assert_eq!(
+            split_artist_name_contextual("Simon & Garfunkel", &known),
+            None
+        );
+    }
+
+    #[test]
+    fn test_contextual_ampersand_second_component_known() {
+        let known: HashSet<String> = ["john coltrane"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Duke Ellington & John Coltrane", &known),
+            Some(vec!["Duke Ellington".into(), "John Coltrane".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_context_free_splits_still_work() {
+        let known: HashSet<String> = HashSet::new();
+        assert_eq!(
+            split_artist_name_contextual("J Dilla / Jay Dee", &known),
+            Some(vec!["J Dilla".into(), "Jay Dee".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_13_and_god() {
+        let known: HashSet<String> = ["god"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("13 & God", &known),
+            Some(vec!["13".into(), "God".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_known_artists_normalized() {
+        let known: HashSet<String> = ["bjork"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Björk & Thom Yorke", &known),
+            Some(vec!["Björk".into(), "Thom Yorke".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_mixed_comma_and_ampersand() {
+        let known: HashSet<String> = ["young"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Crosby, Stills, Nash & Young", &known),
+            Some(vec!["Crosby".into(), "Stills".into(), "Nash".into(), "Young".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_mixed_comma_and_ampersand_no_known() {
+        let known: HashSet<String> = HashSet::new();
+        assert_eq!(
+            split_artist_name_contextual("Crosby, Stills, Nash & Young", &known),
+            Some(vec!["Crosby".into(), "Stills".into(), "Nash & Young".into()])
+        );
+    }
+
+    #[test]
+    fn test_contextual_band_names_not_split_sly() {
+        let known: HashSet<String> = ["sly"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Sly and the Family Stone", &known),
+            None
+        );
+    }
+
+    #[test]
+    fn test_contextual_band_names_not_split_nurse() {
+        let known: HashSet<String> = ["nurse"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            split_artist_name_contextual("Nurse with Wound", &known),
+            None
+        );
+    }
 }
