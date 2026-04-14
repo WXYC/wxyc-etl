@@ -8,6 +8,7 @@
 //! };
 //! ```
 
+pub mod batch;
 pub mod classify;
 pub mod metrics;
 pub mod resolve;
