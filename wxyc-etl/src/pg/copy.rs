@@ -40,6 +40,49 @@ pub fn escape_copy_text_into(buf: &mut Vec<u8>, s: &str) {
     }
 }
 
+/// Format a value for a COPY TEXT column.
+///
+/// `None` and empty strings become `\N` (PostgreSQL NULL).
+/// Non-empty strings are escaped.
+pub fn copy_value(val: Option<&str>) -> String {
+    match val {
+        None | Some("") => "\\N".to_string(),
+        Some(s) => escape_copy_text(s),
+    }
+}
+
+/// Format a COPY TEXT row from a slice of column values.
+///
+/// Joins values with tabs and appends a newline.
+pub fn copy_line(values: &[Option<&str>]) -> String {
+    let mut line = String::new();
+    for (i, val) in values.iter().enumerate() {
+        if i > 0 {
+            line.push('\t');
+        }
+        line.push_str(&copy_value(*val));
+    }
+    line.push('\n');
+    line
+}
+
+/// Write a COPY TEXT row directly into a byte buffer.
+///
+/// This is the zero-allocation counterpart of [`copy_line()`]. Values are
+/// tab-separated; `None` and empty strings become `\N` (PostgreSQL NULL).
+pub fn write_copy_row(buf: &mut Vec<u8>, values: &[Option<&str>]) {
+    for (i, val) in values.iter().enumerate() {
+        if i > 0 {
+            buf.push(b'\t');
+        }
+        match val {
+            None | Some("") => buf.extend_from_slice(b"\\N"),
+            Some(s) => escape_copy_text_into(buf, s),
+        }
+    }
+    buf.push(b'\n');
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +149,108 @@ mod tests {
                 escape_copy_text(s),
                 "Mismatch for input: {:?}",
                 s,
+            );
+        }
+    }
+
+    // -- copy_value tests --
+
+    #[test]
+    fn test_copy_value_none() {
+        assert_eq!(copy_value(None), "\\N");
+    }
+
+    #[test]
+    fn test_copy_value_empty() {
+        assert_eq!(copy_value(Some("")), "\\N");
+    }
+
+    #[test]
+    fn test_copy_value_normal() {
+        assert_eq!(copy_value(Some("hello")), "hello");
+    }
+
+    #[test]
+    fn test_copy_value_special_chars() {
+        assert_eq!(copy_value(Some("a\tb")), "a\\tb");
+    }
+
+    // -- copy_line tests --
+
+    #[test]
+    fn test_copy_line_all_values() {
+        let line = copy_line(&[Some("1001"), Some("Test Title"), Some("US")]);
+        assert_eq!(line, "1001\tTest Title\tUS\n");
+    }
+
+    #[test]
+    fn test_copy_line_with_nulls() {
+        let line = copy_line(&[Some("1001"), None, Some("US")]);
+        assert_eq!(line, "1001\t\\N\tUS\n");
+    }
+
+    #[test]
+    fn test_copy_line_empty_string_becomes_null() {
+        let line = copy_line(&[Some("1001"), Some(""), Some("US")]);
+        assert_eq!(line, "1001\t\\N\tUS\n");
+    }
+
+    #[test]
+    fn test_copy_line_with_special_chars() {
+        let line = copy_line(&[Some("1"), Some("Title with\ttab"), Some("Note\nline2")]);
+        assert_eq!(line, "1\tTitle with\\ttab\tNote\\nline2\n");
+    }
+
+    // -- write_copy_row tests --
+
+    #[test]
+    fn test_write_copy_row_all_values() {
+        let mut buf = Vec::new();
+        write_copy_row(&mut buf, &[Some("1001"), Some("Test Title"), Some("US")]);
+        assert_eq!(buf, b"1001\tTest Title\tUS\n");
+    }
+
+    #[test]
+    fn test_write_copy_row_with_nulls() {
+        let mut buf = Vec::new();
+        write_copy_row(&mut buf, &[Some("1001"), None, Some("US")]);
+        assert_eq!(buf, b"1001\t\\N\tUS\n");
+    }
+
+    #[test]
+    fn test_write_copy_row_empty_string_becomes_null() {
+        let mut buf = Vec::new();
+        write_copy_row(&mut buf, &[Some("1001"), Some(""), Some("US")]);
+        assert_eq!(buf, b"1001\t\\N\tUS\n");
+    }
+
+    #[test]
+    fn test_write_copy_row_with_special_chars() {
+        let mut buf = Vec::new();
+        write_copy_row(
+            &mut buf,
+            &[Some("1"), Some("Title with\ttab"), Some("Note\nline2")],
+        );
+        assert_eq!(buf, b"1\tTitle with\\ttab\tNote\\nline2\n");
+    }
+
+    #[test]
+    fn test_write_copy_row_matches_copy_line() {
+        let test_cases: Vec<Vec<Option<&str>>> = vec![
+            vec![Some("1001"), Some("Test"), Some("US")],
+            vec![Some("1"), None, Some("value")],
+            vec![Some("42"), Some(""), Some("end")],
+            vec![Some("1"), Some("tab\there"), Some("nl\nhere")],
+        ];
+        for values in &test_cases {
+            let mut buf = Vec::new();
+            write_copy_row(&mut buf, values);
+            let expected = copy_line(values);
+            assert_eq!(
+                String::from_utf8(buf).unwrap(),
+                expected,
+                "Mismatch for values: {:?}",
+                values,
             );
         }
     }
