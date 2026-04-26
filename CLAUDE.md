@@ -93,6 +93,23 @@ Four jobs on push to `main` and on PR:
 | `test-postgres` | `cargo test --workspace -- --test-threads=1` against a Postgres 16 service container on port 5433. |
 | `python-wheel` | maturin builds a release wheel, pip installs it, runs `pytest wxyc-etl-python/tests/`, then runs the wheel-lifecycle smoke test. |
 
+## Reusable: CI marker / workflow sync check
+
+`scripts/check_marker_ci_sync.py` verifies a repo's pytest marker scheme stays in sync with its CI invocations. It catches the WXYC/discogs-etl#103 failure mode (markers excluded by addopts, no CI job re-selects them, marked tests silently dropped). Sister WXYC repos invoke it via the reusable workflow `.github/workflows/check-ci-marker-sync.yml`:
+
+```yaml
+# in another repo's .github/workflows/ci.yml
+jobs:
+  marker-sync:
+    uses: WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@main
+    with:
+      repo-path: "."           # or "subpkg/" if pyproject lives in a subdir
+      workflows-dir: ".github/workflows"
+      tests-dir: "tests"
+```
+
+Intentional opt-out for a marker that is, by design, manual-only: add `# ci-sync-skip: <marker> reason: <text>` anywhere in pyproject.toml (the script greps the raw text). See `wxyc-etl-python/pyproject.toml` for a live example (the `perf` marker).
+
 ## Consumers
 
 Repos that depend on wxyc-etl by Cargo path or via the Python wheel:

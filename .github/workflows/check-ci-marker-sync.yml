@@ -1,0 +1,66 @@
+name: Check CI marker sync
+
+# Reusable workflow that verifies a calling repo's pytest marker scheme stays
+# in sync with its CI workflows. Invoked from sister WXYC repos as:
+#
+#   jobs:
+#     check-ci-marker-sync:
+#       uses: WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@main
+#       with:
+#         repo-path: "."           # or "service/" for monorepo subdirs
+#         workflows-dir: ".github/workflows"
+#         tests-dir: "tests"
+#
+# All inputs are optional and default to single-package layout. The job fails
+# if any marker actually used by tests in the repo is excluded by addopts and
+# not explicitly re-selected by any CI pytest invocation.
+
+on:
+  workflow_call:
+    inputs:
+      repo-path:
+        description: "Path within the calling repo containing pyproject.toml"
+        type: string
+        default: "."
+      workflows-dir:
+        description: "Path to .github/workflows within the calling repo"
+        type: string
+        default: ".github/workflows"
+      tests-dir:
+        description: "Path to the test directory within the calling repo"
+        type: string
+        default: "tests"
+      wxyc-etl-ref:
+        description: "Git ref of WXYC/wxyc-etl to use for the script"
+        type: string
+        default: "main"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@v4
+        with:
+          path: target-repo
+
+      - name: Checkout wxyc-etl (for the script)
+        uses: actions/checkout@v4
+        with:
+          repository: WXYC/wxyc-etl
+          ref: ${{ inputs.wxyc-etl-ref }}
+          path: wxyc-etl
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install script dependencies
+        run: pip install pyyaml
+
+      - name: Check marker / CI sync
+        run: |
+          python "$GITHUB_WORKSPACE/wxyc-etl/scripts/check_marker_ci_sync.py" \
+            --repo-path "$GITHUB_WORKSPACE/target-repo/${{ inputs.repo-path }}" \
+            --workflows-dir "$GITHUB_WORKSPACE/target-repo/${{ inputs.workflows-dir }}" \
+            --tests-dir "$GITHUB_WORKSPACE/target-repo/${{ inputs.tests-dir }}"

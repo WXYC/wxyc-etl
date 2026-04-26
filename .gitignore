@@ -1,0 +1,5 @@
+/target
+/wxyc-etl-python/target
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
