@@ -27,16 +27,12 @@ impl SqliteWriter {
     pub fn new(config: SqliteWriterConfig) -> Result<Self> {
         if config.db_path.exists() {
             std::fs::remove_file(&config.db_path).with_context(|| {
-                format!(
-                    "removing existing database: {}",
-                    config.db_path.display()
-                )
+                format!("removing existing database: {}", config.db_path.display())
             })?;
         }
 
-        let conn = Connection::open(&config.db_path).with_context(|| {
-            format!("creating SQLite database: {}", config.db_path.display())
-        })?;
+        let conn = Connection::open(&config.db_path)
+            .with_context(|| format!("creating SQLite database: {}", config.db_path.display()))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;

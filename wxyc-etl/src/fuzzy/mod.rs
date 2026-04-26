@@ -53,7 +53,10 @@ mod tests {
             assert!(
                 (actual - expected).abs() < 0.05,
                 "token_set_ratio({:?}, {:?}): got {:.4}, expected {:.4}",
-                s1, s2, actual, expected,
+                s1,
+                s2,
+                actual,
+                expected,
             );
         }
     }
@@ -76,7 +79,10 @@ mod tests {
             assert!(
                 (actual - expected).abs() < 0.05,
                 "token_sort_ratio({:?}, {:?}): got {:.4}, expected {:.4}",
-                s1, s2, actual, expected,
+                s1,
+                s2,
+                actual,
+                expected,
             );
         }
     }
@@ -91,7 +97,8 @@ mod tests {
         assert!(
             score_similar > score_different,
             "ranking violated: similar={:.4} should be > different={:.4}",
-            score_similar, score_different,
+            score_similar,
+            score_different,
         );
     }
 }

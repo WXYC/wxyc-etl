@@ -22,13 +22,13 @@
 //! let stats = run_pipeline(rx, handle, |item| Some(transform(item)), &mut output)?;
 //! ```
 
-pub mod scanner;
 pub mod processor;
-pub mod writer;
 pub mod runner;
+pub mod scanner;
+pub mod writer;
 
 // Re-exports for ergonomic `use wxyc_etl::pipeline::*` imports.
-pub use scanner::{Batch, BatchConfig, BatchSender, ByteBatch, start_scanner, start_byte_scanner};
 pub use processor::{process_batch, process_byte_batch};
+pub use runner::{run_byte_pipeline, run_pipeline, DedupConfig, PipelineStats};
+pub use scanner::{start_byte_scanner, start_scanner, Batch, BatchConfig, BatchSender, ByteBatch};
 pub use writer::PipelineOutput;
-pub use runner::{DedupConfig, PipelineStats, run_pipeline, run_byte_pipeline};

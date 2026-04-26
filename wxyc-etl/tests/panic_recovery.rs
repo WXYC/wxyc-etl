@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 
-use wxyc_etl::pipeline::scanner::{start_scanner, BatchConfig};
 use wxyc_etl::pipeline::runner::run_pipeline;
+use wxyc_etl::pipeline::scanner::{start_scanner, BatchConfig};
 use wxyc_etl::pipeline::writer::PipelineOutput;
 
 /// WXYC example artists used as test data throughout these tests.

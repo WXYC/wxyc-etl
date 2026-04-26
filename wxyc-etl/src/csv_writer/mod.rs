@@ -94,16 +94,40 @@ mod tests {
         let mut writer = MultiCsvWriter::new(dir.path(), &specs).unwrap();
 
         // Write release rows
-        writer.writer(0).write_record(&["1001", "Confield", "UK"]).unwrap();
-        writer.writer(0).write_record(&["1002", "Aluminum Tunes", "UK"]).unwrap();
-        writer.writer(0).write_record(&["1003", "Moon Pix", "US"]).unwrap();
-        writer.writer(0).write_record(&["1004", "DOGA", "AR"]).unwrap();
+        writer
+            .writer(0)
+            .write_record(&["1001", "Confield", "UK"])
+            .unwrap();
+        writer
+            .writer(0)
+            .write_record(&["1002", "Aluminum Tunes", "UK"])
+            .unwrap();
+        writer
+            .writer(0)
+            .write_record(&["1003", "Moon Pix", "US"])
+            .unwrap();
+        writer
+            .writer(0)
+            .write_record(&["1004", "DOGA", "AR"])
+            .unwrap();
 
         // Write release_artist rows
-        writer.writer(1).write_record(&["1001", "Autechre", "Main"]).unwrap();
-        writer.writer(1).write_record(&["1002", "Stereolab", "Main"]).unwrap();
-        writer.writer(1).write_record(&["1003", "Cat Power", "Main"]).unwrap();
-        writer.writer(1).write_record(&["1004", "Juana Molina", "Main"]).unwrap();
+        writer
+            .writer(1)
+            .write_record(&["1001", "Autechre", "Main"])
+            .unwrap();
+        writer
+            .writer(1)
+            .write_record(&["1002", "Stereolab", "Main"])
+            .unwrap();
+        writer
+            .writer(1)
+            .write_record(&["1003", "Cat Power", "Main"])
+            .unwrap();
+        writer
+            .writer(1)
+            .write_record(&["1004", "Juana Molina", "Main"])
+            .unwrap();
 
         writer.flush_all().unwrap();
 
@@ -142,16 +166,31 @@ mod tests {
         ];
         let mut writer = MultiCsvWriter::new(dir.path(), &specs).unwrap();
 
-        writer.writer_by_name("artist.csv").unwrap()
-            .write_record(&["1", "Autechre"]).unwrap();
-        writer.writer_by_name("artist.csv").unwrap()
-            .write_record(&["2", "Stereolab"]).unwrap();
-        writer.writer_by_name("label.csv").unwrap()
-            .write_record(&["1", "Warp"]).unwrap();
-        writer.writer_by_name("label.csv").unwrap()
-            .write_record(&["2", "Duophonic"]).unwrap();
-        writer.writer_by_name("release.csv").unwrap()
-            .write_record(&["1001", "Confield"]).unwrap();
+        writer
+            .writer_by_name("artist.csv")
+            .unwrap()
+            .write_record(&["1", "Autechre"])
+            .unwrap();
+        writer
+            .writer_by_name("artist.csv")
+            .unwrap()
+            .write_record(&["2", "Stereolab"])
+            .unwrap();
+        writer
+            .writer_by_name("label.csv")
+            .unwrap()
+            .write_record(&["1", "Warp"])
+            .unwrap();
+        writer
+            .writer_by_name("label.csv")
+            .unwrap()
+            .write_record(&["2", "Duophonic"])
+            .unwrap();
+        writer
+            .writer_by_name("release.csv")
+            .unwrap()
+            .write_record(&["1001", "Confield"])
+            .unwrap();
 
         writer.flush_all().unwrap();
 
@@ -176,18 +215,18 @@ mod tests {
         let specs = vec![CsvFileSpec::new("test.csv", &["artist", "title"])];
         let mut writer = MultiCsvWriter::new(dir.path(), &specs).unwrap();
 
-        writer.writer(0).write_record(&[
-            "Duke Ellington & John Coltrane",
-            "In a Sentimental Mood",
-        ]).unwrap();
-        writer.writer(0).write_record(&[
-            "Prince Jammy",
-            "...Destroys The Space Invaders",
-        ]).unwrap();
-        writer.writer(0).write_record(&[
-            "Father John Misty",
-            "I Love You, Honeybear",
-        ]).unwrap();
+        writer
+            .writer(0)
+            .write_record(&["Duke Ellington & John Coltrane", "In a Sentimental Mood"])
+            .unwrap();
+        writer
+            .writer(0)
+            .write_record(&["Prince Jammy", "...Destroys The Space Invaders"])
+            .unwrap();
+        writer
+            .writer(0)
+            .write_record(&["Father John Misty", "I Love You, Honeybear"])
+            .unwrap();
         writer.flush_all().unwrap();
 
         let mut rdr = csv::Reader::from_path(dir.path().join("test.csv")).unwrap();
@@ -205,7 +244,10 @@ mod tests {
         writer.flush_all().unwrap();
 
         let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
-        assert!(entries.is_empty(), "no CSV files should be created for empty specs");
+        assert!(
+            entries.is_empty(),
+            "no CSV files should be created for empty specs"
+        );
     }
 
     #[test]

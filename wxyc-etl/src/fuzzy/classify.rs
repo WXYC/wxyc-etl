@@ -137,7 +137,10 @@ pub fn classify_release(
 
 /// Returns 1.0 if the (artist, title) pair is in the exact_pairs set, 0.0 otherwise.
 pub fn score_exact(norm_artist: &str, norm_title: &str, index: &LibraryIndex) -> f64 {
-    if index.exact_pairs.contains(&(norm_artist.to_string(), norm_title.to_string())) {
+    if index
+        .exact_pairs
+        .contains(&(norm_artist.to_string(), norm_title.to_string()))
+    {
         1.0
     } else {
         0.0
@@ -146,12 +149,22 @@ pub fn score_exact(norm_artist: &str, norm_title: &str, index: &LibraryIndex) ->
 
 /// Best token_set_ratio of "artist ||| title" against all combined_strings.
 pub fn score_token_set(norm_artist: &str, norm_title: &str, index: &LibraryIndex) -> f64 {
-    score_combined(norm_artist, norm_title, index, super::metrics::token_set_ratio)
+    score_combined(
+        norm_artist,
+        norm_title,
+        index,
+        super::metrics::token_set_ratio,
+    )
 }
 
 /// Best token_sort_ratio of "artist ||| title" against all combined_strings.
 pub fn score_token_sort(norm_artist: &str, norm_title: &str, index: &LibraryIndex) -> f64 {
-    score_combined(norm_artist, norm_title, index, super::metrics::token_sort_ratio)
+    score_combined(
+        norm_artist,
+        norm_title,
+        index,
+        super::metrics::token_sort_ratio,
+    )
 }
 
 /// Shared implementation for token_set and token_sort combined-string scoring.
@@ -229,9 +242,15 @@ mod tests {
         let index = LibraryIndex::from_pairs(&pairs);
 
         assert_eq!(index.exact_pairs.len(), 3);
-        assert!(index.exact_pairs.contains(&("juana molina".into(), "doga".into())));
-        assert!(index.exact_pairs.contains(&("stereolab".into(), "aluminum tunes".into())));
-        assert!(index.exact_pairs.contains(&("cat power".into(), "moon pix".into())));
+        assert!(index
+            .exact_pairs
+            .contains(&("juana molina".into(), "doga".into())));
+        assert!(index
+            .exact_pairs
+            .contains(&("stereolab".into(), "aluminum tunes".into())));
+        assert!(index
+            .exact_pairs
+            .contains(&("cat power".into(), "moon pix".into())));
     }
 
     #[test]
@@ -265,9 +284,7 @@ mod tests {
 
     #[test]
     fn test_library_index_combined_strings() {
-        let pairs = vec![
-            ("Cat Power".to_string(), "Moon Pix".to_string()),
-        ];
+        let pairs = vec![("Cat Power".to_string(), "Moon Pix".to_string())];
         let index = LibraryIndex::from_pairs(&pairs);
 
         assert_eq!(index.combined_strings.len(), 1);
@@ -354,7 +371,11 @@ mod tests {
         let index = build_test_index();
         let score = score_two_stage("juana molina", "nonexistent album", &index, 0.7);
         // Artist matches but title doesn't — geometric mean pulls score down
-        assert!(score < 0.8, "expected moderate two_stage score, got {}", score);
+        assert!(
+            score < 0.8,
+            "expected moderate two_stage score, got {}",
+            score
+        );
     }
 
     // --- classify_release ---
@@ -408,7 +429,8 @@ mod tests {
         // This should be REVIEW (artist matches but title doesn't)
         assert!(
             matches!(result, Classification::Review | Classification::Prune),
-            "expected Review or Prune, got {:?}", result
+            "expected Review or Prune, got {:?}",
+            result
         );
     }
 
@@ -419,21 +441,39 @@ mod tests {
     fn build_wxyc_index() -> LibraryIndex {
         let pairs = vec![
             ("Autechre".to_string(), "Confield".to_string()),
-            ("Prince Jammy".to_string(), "...Destroys The Space Invaders".to_string()),
+            (
+                "Prince Jammy".to_string(),
+                "...Destroys The Space Invaders".to_string(),
+            ),
             ("Juana Molina".to_string(), "DOGA".to_string()),
             ("Stereolab".to_string(), "Aluminum Tunes".to_string()),
             ("Cat Power".to_string(), "Moon Pix".to_string()),
-            ("Jessica Pratt".to_string(), "On Your Own Love Again".to_string()),
+            (
+                "Jessica Pratt".to_string(),
+                "On Your Own Love Again".to_string(),
+            ),
             ("Chuquimamani-Condori".to_string(), "Edits".to_string()),
-            ("Duke Ellington & John Coltrane".to_string(), "Duke Ellington & John Coltrane".to_string()),
+            (
+                "Duke Ellington & John Coltrane".to_string(),
+                "Duke Ellington & John Coltrane".to_string(),
+            ),
             ("Sessa".to_string(), "Pequena Vertigem de Amor".to_string()),
             ("Anne Gillis".to_string(), "Eyry".to_string()),
-            ("Father John Misty".to_string(), "I Love You, Honeybear".to_string()),
+            (
+                "Father John Misty".to_string(),
+                "I Love You, Honeybear".to_string(),
+            ),
             ("Rafael Toral".to_string(), "Traveling Light".to_string()),
             ("Buck Meek".to_string(), "Gasoline".to_string()),
-            ("Nourished by Time".to_string(), "The Passionate Ones".to_string()),
+            (
+                "Nourished by Time".to_string(),
+                "The Passionate Ones".to_string(),
+            ),
             ("For Tracy Hyde".to_string(), "Hotel Insomnia".to_string()),
-            ("Rochelle Jordan".to_string(), "Through the Wall".to_string()),
+            (
+                "Rochelle Jordan".to_string(),
+                "Through the Wall".to_string(),
+            ),
             ("Large Professor".to_string(), "1st Class".to_string()),
         ];
         LibraryIndex::from_pairs(&pairs)
@@ -610,7 +650,11 @@ mod tests {
         // "duke ellington" shares tokens with the combined string for
         // "duke ellington & john coltrane ||| duke ellington & john coltrane"
         let score = score_token_set("duke ellington", "duke ellington", &index);
-        assert!(score > 0.7, "shared tokens should produce high score, got {}", score);
+        assert!(
+            score > 0.7,
+            "shared tokens should produce high score, got {}",
+            score
+        );
     }
 
     #[test]
@@ -620,14 +664,19 @@ mod tests {
 
         // Good artist + good title
         let score_good = score_two_stage("jessica pratt", "on your own love again", &index, 0.7);
-        assert!(score_good > 0.9, "exact artist+title should score high, got {}", score_good);
+        assert!(
+            score_good > 0.9,
+            "exact artist+title should score high, got {}",
+            score_good
+        );
 
         // Good artist + bad title
         let score_bad_title = score_two_stage("jessica pratt", "nonexistent album", &index, 0.7);
         assert!(
             score_bad_title < score_good,
             "bad title should score lower than good title: {} vs {}",
-            score_bad_title, score_good,
+            score_bad_title,
+            score_good,
         );
 
         // Bad artist (below artist_threshold) returns 0.0

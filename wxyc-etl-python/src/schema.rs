@@ -18,7 +18,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("RELEASE_GENRE_TABLE", discogs::RELEASE_GENRE_TABLE)?;
     m.add("RELEASE_STYLE_TABLE", discogs::RELEASE_STYLE_TABLE)?;
     m.add("RELEASE_TRACK_TABLE", discogs::RELEASE_TRACK_TABLE)?;
-    m.add("RELEASE_TRACK_ARTIST_TABLE", discogs::RELEASE_TRACK_ARTIST_TABLE)?;
+    m.add(
+        "RELEASE_TRACK_ARTIST_TABLE",
+        discogs::RELEASE_TRACK_ARTIST_TABLE,
+    )?;
     m.add("ARTIST_TABLE", discogs::ARTIST_TABLE)?;
     m.add("ARTIST_ALIAS_TABLE", discogs::ARTIST_ALIAS_TABLE)?;
     m.add("CACHE_METADATA_TABLE", discogs::CACHE_METADATA_TABLE)?;
@@ -38,7 +41,10 @@ fn discogs_tables() -> Vec<String> {
 /// Release table column names.
 #[pyfunction]
 fn discogs_release_columns() -> Vec<String> {
-    discogs::RELEASE_COLUMNS.iter().map(|s| s.to_string()).collect()
+    discogs::RELEASE_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Library.db DDL.
@@ -50,7 +56,10 @@ fn library_ddl() -> String {
 /// Library table column names.
 #[pyfunction]
 fn library_columns() -> Vec<String> {
-    library::LIBRARY_COLUMNS.iter().map(|s| s.to_string()).collect()
+    library::LIBRARY_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Entity identity DDL.

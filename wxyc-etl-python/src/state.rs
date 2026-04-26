@@ -63,7 +63,9 @@ impl PipelineState {
 
     /// Raise an error if db_url or csv_dir don't match this state.
     fn validate_resume(&self, db_url: &str, csv_dir: &str) -> PyResult<()> {
-        self.inner.validate_resume(db_url, csv_dir).map_err(to_py_value_err)
+        self.inner
+            .validate_resume(db_url, csv_dir)
+            .map_err(to_py_value_err)
     }
 
     /// Write state to a JSON file.

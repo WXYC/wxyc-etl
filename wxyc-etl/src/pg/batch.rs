@@ -185,9 +185,7 @@ mod tests {
         copier
             .buffer("release_artist")
             .extend_from_slice(b"child data\n");
-        copier
-            .buffer("release")
-            .extend_from_slice(b"parent data\n");
+        copier.buffer("release").extend_from_slice(b"parent data\n");
         copier.batch_count = 1; // simulate one record
 
         let mut target = MockCopyTarget::new();
@@ -212,9 +210,7 @@ mod tests {
         );
 
         // Only write to release, not release_artist
-        copier
-            .buffer("release")
-            .extend_from_slice(b"data\n");
+        copier.buffer("release").extend_from_slice(b"data\n");
         copier.batch_count = 1;
 
         let mut target = MockCopyTarget::new();
@@ -226,10 +222,7 @@ mod tests {
 
     #[test]
     fn test_flush_noop_when_empty() {
-        let mut copier = BatchCopier::new(
-            &[("release", "COPY release FROM STDIN")],
-            100,
-        );
+        let mut copier = BatchCopier::new(&[("release", "COPY release FROM STDIN")], 100);
 
         let mut target = MockCopyTarget::new();
         copier.flush(&mut target).unwrap();
@@ -239,10 +232,7 @@ mod tests {
 
     #[test]
     fn test_count_and_maybe_flush() {
-        let mut copier = BatchCopier::new(
-            &[("release", "COPY release FROM STDIN")],
-            2,
-        );
+        let mut copier = BatchCopier::new(&[("release", "COPY release FROM STDIN")], 2);
 
         let mut target = MockCopyTarget::new();
 
@@ -260,10 +250,7 @@ mod tests {
 
     #[test]
     fn test_total_written_accumulates() {
-        let mut copier = BatchCopier::new(
-            &[("release", "COPY release FROM STDIN")],
-            1,
-        );
+        let mut copier = BatchCopier::new(&[("release", "COPY release FROM STDIN")], 1);
 
         let mut target = MockCopyTarget::new();
 
@@ -281,19 +268,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "unknown table")]
     fn test_buffer_panics_on_unknown_table() {
-        let mut copier = BatchCopier::new(
-            &[("release", "COPY release FROM STDIN")],
-            100,
-        );
+        let mut copier = BatchCopier::new(&[("release", "COPY release FROM STDIN")], 100);
         copier.buffer("nonexistent");
     }
 
     #[test]
     fn test_buffers_cleared_after_flush() {
-        let mut copier = BatchCopier::new(
-            &[("release", "COPY release FROM STDIN")],
-            1,
-        );
+        let mut copier = BatchCopier::new(&[("release", "COPY release FROM STDIN")], 1);
 
         let mut target = MockCopyTarget::new();
 

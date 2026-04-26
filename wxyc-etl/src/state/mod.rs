@@ -7,7 +7,7 @@
 pub mod introspect;
 mod state;
 
-pub use state::{PipelineState, StepStatus, STEP_NAMES, STATE_VERSION};
+pub use state::{PipelineState, StepStatus, STATE_VERSION, STEP_NAMES};
 
 #[cfg(test)]
 mod tests {
@@ -196,21 +196,27 @@ mod tests {
     fn validate_resume_ok() {
         let steps = &["step1"];
         let state = PipelineState::new("postgresql:///discogs", "/tmp/csv", steps);
-        assert!(state.validate_resume("postgresql:///discogs", "/tmp/csv").is_ok());
+        assert!(state
+            .validate_resume("postgresql:///discogs", "/tmp/csv")
+            .is_ok());
     }
 
     #[test]
     fn validate_resume_db_mismatch() {
         let steps = &["step1"];
         let state = PipelineState::new("postgresql:///discogs", "/tmp/csv", steps);
-        assert!(state.validate_resume("postgresql:///other", "/tmp/csv").is_err());
+        assert!(state
+            .validate_resume("postgresql:///other", "/tmp/csv")
+            .is_err());
     }
 
     #[test]
     fn validate_resume_csv_dir_mismatch() {
         let steps = &["step1"];
         let state = PipelineState::new("postgresql:///discogs", "/tmp/csv", steps);
-        assert!(state.validate_resume("postgresql:///discogs", "/other/csv").is_err());
+        assert!(state
+            .validate_resume("postgresql:///discogs", "/other/csv")
+            .is_err());
     }
 
     #[test]

@@ -24,13 +24,21 @@ use wxyc_etl::text::{batch_normalize, normalize_artist_name};
 fn wxyc_releases() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
         ("Autechre", "Confield", "Warp"),
-        ("Prince Jammy", "...Destroys The Space Invaders", "Greensleeves"),
+        (
+            "Prince Jammy",
+            "...Destroys The Space Invaders",
+            "Greensleeves",
+        ),
         ("Juana Molina", "DOGA", "Sonamos"),
         ("Stereolab", "Aluminum Tunes", "Duophonic"),
         ("Cat Power", "Moon Pix", "Matador Records"),
         ("Jessica Pratt", "On Your Own Love Again", "Drag City"),
         ("Chuquimamani-Condori", "Edits", "self-released"),
-        ("Duke Ellington & John Coltrane", "Duke Ellington & John Coltrane", "Impulse Records"),
+        (
+            "Duke Ellington & John Coltrane",
+            "Duke Ellington & John Coltrane",
+            "Impulse Records",
+        ),
         ("Sessa", "Pequena Vertigem de Amor", "Mexican Summer"),
         ("Anne Gillis", "Eyry", "Art into Life"),
         ("Father John Misty", "I Love You, Honeybear", "Sub Pop"),
@@ -279,7 +287,12 @@ mod scanner_to_csv_writer {
         let (rx, handle) = start_scanner(
             move |tx| {
                 for (i, (artist, title, label)) in releases.iter().enumerate() {
-                    tx.send_item((i as u64, artist.to_string(), title.to_string(), label.to_string()))?;
+                    tx.send_item((
+                        i as u64,
+                        artist.to_string(),
+                        title.to_string(),
+                        label.to_string(),
+                    ))?;
                 }
                 Ok(release_count)
             },
@@ -339,10 +352,8 @@ mod scanner_to_csv_writer {
 
         // Verify referential integrity: every release_id in release_artist.csv
         // exists in release.csv
-        let release_ids: HashSet<String> = release_records
-            .iter()
-            .map(|r| r[0].to_string())
-            .collect();
+        let release_ids: HashSet<String> =
+            release_records.iter().map(|r| r[0].to_string()).collect();
         for record in &artist_records {
             assert!(
                 release_ids.contains(&record[0]),
@@ -377,7 +388,10 @@ mod text_normalization_to_fuzzy {
                 result,
                 Classification::Keep,
                 "Expected KEEP for ({:?}, {:?}) -> ({:?}, {:?})",
-                artist, title, norm_artist, norm_title,
+                artist,
+                title,
+                norm_artist,
+                norm_title,
             );
         }
     }
@@ -390,14 +404,19 @@ mod text_normalization_to_fuzzy {
         let index = LibraryIndex::from_pairs(&pairs);
         let config = ClassifyConfig::default();
 
-        let artists: Vec<String> = wxyc_releases().iter().map(|(a, _, _)| a.to_string()).collect();
-        let titles: Vec<String> = wxyc_releases().iter().map(|(_, t, _)| t.to_string()).collect();
+        let artists: Vec<String> = wxyc_releases()
+            .iter()
+            .map(|(a, _, _)| a.to_string())
+            .collect();
+        let titles: Vec<String> = wxyc_releases()
+            .iter()
+            .map(|(_, t, _)| t.to_string())
+            .collect();
 
         // Batch path: normalize then classify
         let norm_artists = batch_normalize(&artists);
         let norm_titles = batch_normalize(&titles);
-        let batch_results =
-            batch_classify_releases(&norm_artists, &norm_titles, &index, &config);
+        let batch_results = batch_classify_releases(&norm_artists, &norm_titles, &index, &config);
 
         // Individual path
         let individual_results: Vec<Classification> = artists
@@ -417,7 +436,10 @@ mod text_normalization_to_fuzzy {
     /// ASCII-only names should normalize to non-empty strings.
     #[test]
     fn normalization_preserves_nonempty_for_ascii_artists() {
-        let artists: Vec<String> = wxyc_releases().iter().map(|(a, _, _)| a.to_string()).collect();
+        let artists: Vec<String> = wxyc_releases()
+            .iter()
+            .map(|(a, _, _)| a.to_string())
+            .collect();
         let normalized = batch_normalize(&artists);
 
         for (original, normed) in artists.iter().zip(normalized.iter()) {
@@ -446,7 +468,9 @@ mod text_normalization_to_fuzzy {
             assert!(
                 result.is_some(),
                 "Failed to resolve normalized name {:?} (original: {:?}) at index {}",
-                &normalized[i], original, i,
+                &normalized[i],
+                original,
+                i,
             );
         }
     }
@@ -473,7 +497,8 @@ mod text_normalization_to_fuzzy {
                 result,
                 Classification::Keep,
                 "Diacritics stripping broke matching for ({:?}, {:?})",
-                artist, title,
+                artist,
+                title,
             );
         }
     }
@@ -500,7 +525,8 @@ mod text_normalization_to_fuzzy {
                 result,
                 Classification::Keep,
                 "Non-library release ({:?}, {:?}) should not be KEEP",
-                artist, title,
+                artist,
+                title,
             );
         }
     }
@@ -621,16 +647,8 @@ mod state_to_import {
     #[test]
     fn dedup_set_with_column_mapping_unique_keys() {
         let mapping = ColumnMapping::new(
-            vec![
-                "release_id".into(),
-                "artist_name".into(),
-                "extra".into(),
-            ],
-            vec![
-                "release_id".into(),
-                "artist_name".into(),
-                "extra".into(),
-            ],
+            vec!["release_id".into(), "artist_name".into(), "extra".into()],
+            vec!["release_id".into(), "artist_name".into(), "extra".into()],
             vec!["release_id".into()],
             Some(vec!["release_id".into(), "artist_name".into()]),
         );
@@ -742,8 +760,9 @@ mod full_pipeline_e2e {
         let total = releases.len();
 
         // Filter: only keep releases on specific labels
-        let keep_labels: HashSet<&str> =
-            ["Warp", "Drag City", "Matador Records", "Sub Pop"].into_iter().collect();
+        let keep_labels: HashSet<&str> = ["Warp", "Drag City", "Matador Records", "Sub Pop"]
+            .into_iter()
+            .collect();
 
         let config = BatchConfig {
             batch_size: 4,
@@ -804,7 +823,8 @@ mod full_pipeline_e2e {
             assert!(
                 output_artists.contains(expected),
                 "Expected {:?} in output, got {:?}",
-                expected, output_artists,
+                expected,
+                output_artists,
             );
         }
 
@@ -844,7 +864,7 @@ mod full_pipeline_e2e {
                     b"3\tCat Power\tMoon Pix\tMatador Records",
                 ]))?;
                 tx.send(ByteBatch::from_slices(&[
-                    b"1\tAutechre\tConfield\tWarp",        // duplicate
+                    b"1\tAutechre\tConfield\tWarp", // duplicate
                     b"4\tJuana Molina\tDOGA\tSonamos",
                     b"2\tStereolab\tAluminum Tunes\tDuophonic", // duplicate
                     b"5\tJessica Pratt\tOn Your Own Love Again\tDrag City",
@@ -922,7 +942,11 @@ mod full_pipeline_e2e {
         // Verify no duplicate IDs in output
         let ids: Vec<&str> = records.iter().map(|r| &r[0]).collect();
         let unique_ids: HashSet<&str> = ids.iter().copied().collect();
-        assert_eq!(ids.len(), unique_ids.len(), "CSV should contain no duplicate IDs");
+        assert_eq!(
+            ids.len(),
+            unique_ids.len(),
+            "CSV should contain no duplicate IDs"
+        );
 
         // Verify order is preserved
         assert_eq!(ids, vec!["1", "2", "3", "4", "5"]);
@@ -986,12 +1010,14 @@ mod full_pipeline_e2e {
         // Verify all items are normalized (lowercase, no leading/trailing whitespace)
         for (artist, title) in &output.items {
             assert_eq!(
-                artist, &artist.to_lowercase().trim().to_string(),
+                artist,
+                &artist.to_lowercase().trim().to_string(),
                 "Artist {:?} not normalized",
                 artist,
             );
             assert_eq!(
-                title, &title.to_lowercase().trim().to_string(),
+                title,
+                &title.to_lowercase().trim().to_string(),
                 "Title {:?} not normalized",
                 title,
             );
@@ -1050,7 +1076,10 @@ mod full_pipeline_e2e {
 
         let run1 = run_once();
         let run2 = run_once();
-        assert_eq!(run1, run2, "Pipeline output should be deterministic across runs");
+        assert_eq!(
+            run1, run2,
+            "Pipeline output should be deterministic across runs"
+        );
         assert_eq!(run1.len(), wxyc_releases().len());
         assert_eq!(run1[0], "Autechre - Confield");
     }

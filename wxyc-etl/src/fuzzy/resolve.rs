@@ -106,7 +106,12 @@ mod tests {
     #[test]
     fn test_best_match_below_threshold_returns_none() {
         let candidates = vec!["Autechre".to_string(), "Stereolab".to_string()];
-        let result = best_match("completely different", &candidates, jaro_winkler_similarity, 0.9);
+        let result = best_match(
+            "completely different",
+            &candidates,
+            jaro_winkler_similarity,
+            0.9,
+        );
         assert!(result.is_none());
     }
 
@@ -203,7 +208,10 @@ mod tests {
         assert_eq!(results[2], Some("Cat Power".to_string()));
         assert_eq!(results[3], Some("Jessica Pratt".to_string()));
         assert_eq!(results[4], Some("Chuquimamani-Condori".to_string()));
-        assert_eq!(results[5], Some("Duke Ellington & John Coltrane".to_string()));
+        assert_eq!(
+            results[5],
+            Some("Duke Ellington & John Coltrane".to_string())
+        );
     }
 
     #[test]
@@ -229,9 +237,9 @@ mod tests {
     fn test_resolve_wxyc_close_misspellings() {
         let catalog = wxyc_catalog();
         let names = vec![
-            "Autechree".to_string(),     // extra 'e'
-            "Stereolabb".to_string(),    // extra 'b'
-            "Jessica Prat".to_string(),  // missing 't'
+            "Autechree".to_string(),    // extra 'e'
+            "Stereolabb".to_string(),   // extra 'b'
+            "Jessica Prat".to_string(), // missing 't'
         ];
         let results = batch_fuzzy_resolve(&names, &catalog, 0.8, 2, 0.02);
         // Close misspellings should resolve to the correct artist
@@ -245,7 +253,7 @@ mod tests {
         // Create a catalog with deliberately close names to test ambiguity
         let catalog = vec![
             "Cat Power".to_string(),
-            "Cat Powder".to_string(),  // very similar
+            "Cat Powder".to_string(), // very similar
             "Stereolab".to_string(),
         ];
         // With a tight ambiguity_threshold, "Cat Powe" should be rejected
@@ -261,10 +269,7 @@ mod tests {
     fn test_resolve_wxyc_limit_1_no_ambiguity_guard() {
         // With limit=1, only one candidate is considered so the ambiguity
         // guard never fires
-        let catalog = vec![
-            "Cat Power".to_string(),
-            "Cat Powder".to_string(),
-        ];
+        let catalog = vec!["Cat Power".to_string(), "Cat Powder".to_string()];
         let names = vec!["Cat Power".to_string()];
         let results = batch_fuzzy_resolve(&names, &catalog, 0.8, 1, 0.05);
         assert_eq!(results[0], Some("Cat Power".to_string()));
@@ -293,12 +298,7 @@ mod tests {
         assert!(ts_result.is_some(), "reordered tokens should match");
 
         // token_sort_ratio: sorted comparison
-        let tr_result = best_match(
-            "Pratt Jessica",
-            &catalog,
-            token_sort_ratio,
-            0.7,
-        );
+        let tr_result = best_match("Pratt Jessica", &catalog, token_sort_ratio, 0.7);
         assert!(tr_result.is_some(), "reversed name should match");
         let (idx, _) = tr_result.unwrap();
         assert_eq!(catalog[idx], "Jessica Pratt");
