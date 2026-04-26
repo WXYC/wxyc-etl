@@ -10,17 +10,14 @@ from wxyc_etl import text
 @pytest.mark.parametrize(
     "input_name,expected",
     [
-        ("Radiohead", "radiohead"),
-        ("  Radiohead  ", "radiohead"),
-        ("RADIOHEAD", "radiohead"),
+        ("Stereolab", "stereolab"),
+        ("  Stereolab  ", "stereolab"),
+        ("STEREOLAB", "stereolab"),
         ("  Mixed Case  ", "mixed case"),
         ("", ""),
-        ("Björk", "bjork"),
-        ("Sigur Rós", "sigur ros"),
-        ("Motörhead", "motorhead"),
-        ("Hüsker Dü", "husker du"),
-        ("Café Tacvba", "cafe tacvba"),
-        ("Zoé", "zoe"),
+        ("Nilüfer Yanya", "nilufer yanya"),
+        ("Csillagrablók", "csillagrablok"),
+        ("Hermanos Gutiérrez", "hermanos gutierrez"),
     ],
     ids=[
         "lowercase",
@@ -28,12 +25,9 @@ from wxyc_etl import text
         "all_caps",
         "mixed_case_strip",
         "empty",
-        "bjork",
-        "sigur_ros",
-        "motorhead",
-        "husker_du",
-        "cafe_tacvba",
-        "zoe",
+        "nilufer_yanya",
+        "csillagrablok",
+        "hermanos_gutierrez",
     ],
 )
 def test_normalize_artist_name(input_name, expected):
@@ -51,9 +45,9 @@ def test_normalize_artist_name_none():
 @pytest.mark.parametrize(
     "input_str,expected",
     [
-        ("Björk", "Bjork"),
-        ("  Café  ", "  Cafe  "),
-        ("Radiohead", "Radiohead"),
+        ("Nilüfer Yanya", "Nilufer Yanya"),
+        ("  Hermanos Gutiérrez  ", "  Hermanos Gutierrez  "),
+        ("Stereolab", "Stereolab"),
         ("", ""),
     ],
 )
@@ -65,8 +59,8 @@ def test_strip_diacritics(input_str, expected):
 
 
 def test_batch_normalize():
-    results = text.batch_normalize(["Björk", "Radiohead", "Sigur Rós"])
-    assert results == ["bjork", "radiohead", "sigur ros"]
+    results = text.batch_normalize(["Nilüfer Yanya", "Stereolab", "Csillagrablók"])
+    assert results == ["nilufer yanya", "stereolab", "csillagrablok"]
 
 
 def test_batch_normalize_empty():
@@ -96,8 +90,8 @@ def test_is_compilation_artist(name, expected):
 
 
 def test_split_artist_name_comma():
-    result = text.split_artist_name("Mike Vainio, Ryoji, Alva Noto")
-    assert result == ["Mike Vainio", "Ryoji", "Alva Noto"]
+    result = text.split_artist_name("Yo La Tengo, Stereolab, Autechre")
+    assert result == ["Yo La Tengo", "Stereolab", "Autechre"]
 
 
 def test_split_artist_name_slash():
@@ -115,6 +109,8 @@ def test_split_artist_name_ampersand_no_context():
 
 
 def test_split_artist_name_numeric_guard():
+    # Non-canonical name kept as a guard test input: leading "<digits>," should
+    # not split on the comma.
     assert text.split_artist_name("10,000 Maniacs") is None
 
 
@@ -132,7 +128,7 @@ def test_split_artist_name_contextual_with_known():
 
 
 def test_split_artist_name_contextual_no_known():
-    result = text.split_artist_name_contextual("Simon & Garfunkel", set())
+    result = text.split_artist_name_contextual("Yo La Tengo & Animal Collective", set())
     assert result is None
 
 

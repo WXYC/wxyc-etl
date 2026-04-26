@@ -69,17 +69,17 @@ mod tests {
 
     #[test]
     fn test_normalize_lowercase() {
-        assert_eq!(normalize_artist_name("Radiohead"), "radiohead");
+        assert_eq!(normalize_artist_name("Stereolab"), "stereolab");
     }
 
     #[test]
     fn test_normalize_strip_spaces() {
-        assert_eq!(normalize_artist_name("  Radiohead  "), "radiohead");
+        assert_eq!(normalize_artist_name("  Stereolab  "), "stereolab");
     }
 
     #[test]
     fn test_normalize_all_caps() {
-        assert_eq!(normalize_artist_name("RADIOHEAD"), "radiohead");
+        assert_eq!(normalize_artist_name("STEREOLAB"), "stereolab");
     }
 
     #[test]
@@ -93,13 +93,13 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_bjork() {
-        assert_eq!(normalize_artist_name("Björk"), "bjork");
+    fn test_normalize_nilufer_yanya() {
+        assert_eq!(normalize_artist_name("Nilüfer Yanya"), "nilufer yanya");
     }
 
     #[test]
-    fn test_normalize_sigur_ros() {
-        assert_eq!(normalize_artist_name("Sigur Rós"), "sigur ros");
+    fn test_normalize_csillagrablok() {
+        assert_eq!(normalize_artist_name("Csillagrablók"), "csillagrablok");
     }
 
     #[test]
@@ -113,8 +113,11 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_cafe_tacvba() {
-        assert_eq!(normalize_artist_name("Café Tacvba"), "cafe tacvba");
+    fn test_normalize_hermanos_gutierrez() {
+        assert_eq!(
+            normalize_artist_name("Hermanos Gutiérrez"),
+            "hermanos gutierrez"
+        );
     }
 
     #[test]
@@ -126,34 +129,40 @@ mod tests {
 
     #[test]
     fn test_normalize_trim_no_extra_alloc() {
-        assert_eq!(normalize_artist_name("Radiohead"), "radiohead");
+        assert_eq!(normalize_artist_name("Stereolab"), "stereolab");
     }
 
     #[test]
     fn test_normalize_trim_leading_space() {
-        assert_eq!(normalize_artist_name("  Björk"), "bjork");
+        assert_eq!(normalize_artist_name("  Nilüfer Yanya"), "nilufer yanya");
     }
 
     #[test]
     fn test_normalize_trim_trailing_space() {
-        assert_eq!(normalize_artist_name("Zoé  "), "zoe");
+        assert_eq!(
+            normalize_artist_name("Hermanos Gutiérrez  "),
+            "hermanos gutierrez"
+        );
     }
 
     // --- strip_diacritics: preserves case and whitespace ---
 
     #[test]
     fn test_strip_diacritics_preserves_case() {
-        assert_eq!(strip_diacritics("Björk"), "Bjork");
+        assert_eq!(strip_diacritics("Nilüfer Yanya"), "Nilufer Yanya");
     }
 
     #[test]
     fn test_strip_diacritics_preserves_whitespace() {
-        assert_eq!(strip_diacritics("  Café  "), "  Cafe  ");
+        assert_eq!(
+            strip_diacritics("  Hermanos Gutiérrez  "),
+            "  Hermanos Gutierrez  "
+        );
     }
 
     #[test]
     fn test_strip_diacritics_no_change() {
-        assert_eq!(strip_diacritics("Radiohead"), "Radiohead");
+        assert_eq!(strip_diacritics("Stereolab"), "Stereolab");
     }
 
     #[test]
@@ -165,8 +174,8 @@ mod tests {
 
     #[test]
     fn test_normalize_title_lowercase_and_diacritics() {
-        assert_eq!(normalize_title("Café Tacvba"), "cafe tacvba");
+        assert_eq!(normalize_title("Hermanos Gutiérrez"), "hermanos gutierrez");
         assert_eq!(normalize_title("  Sugar Hill  "), "sugar hill");
-        assert_eq!(normalize_title("OK Computer"), "ok computer");
+        assert_eq!(normalize_title("Aluminum Tunes"), "aluminum tunes");
     }
 }

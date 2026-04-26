@@ -29,10 +29,14 @@ mod tests {
 
     #[test]
     fn test_batch_normalize_basic() {
-        let names = vec!["Björk".into(), "Radiohead".into(), "Sigur Rós".into()];
+        let names = vec![
+            "Nilüfer Yanya".into(),
+            "Stereolab".into(),
+            "Csillagrablók".into(),
+        ];
         assert_eq!(
             batch_normalize(&names),
-            vec!["bjork", "radiohead", "sigur ros"]
+            vec!["nilufer yanya", "stereolab", "csillagrablok"]
         );
     }
 
@@ -46,13 +50,13 @@ mod tests {
     fn test_batch_filter_matches() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("artists.txt");
-        fs::write(&path, "Radiohead\nBjörk\n").unwrap();
+        fs::write(&path, "Stereolab\nNilüfer Yanya\n").unwrap();
 
         let filter = super::super::filter::ArtistFilter::from_file(&path).unwrap();
         let names = vec![
-            "Radiohead".into(),
+            "Stereolab".into(),
             "Unknown".into(),
-            "Björk".into(),
+            "Nilüfer Yanya".into(),
             "Cat Power".into(),
         ];
         assert_eq!(
@@ -65,7 +69,7 @@ mod tests {
     fn test_batch_filter_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("artists.txt");
-        fs::write(&path, "Radiohead\n").unwrap();
+        fs::write(&path, "Stereolab\n").unwrap();
 
         let filter = super::super::filter::ArtistFilter::from_file(&path).unwrap();
         let names: Vec<String> = vec![];

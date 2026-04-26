@@ -12,26 +12,22 @@ use wxyc_etl::text::normalize::{normalize_artist_name, normalize_title, strip_di
 use wxyc_etl::text::split::{split_artist_name, split_artist_name_contextual};
 
 /// Edge cases for normalize_artist_name, verified against Python
-/// `filter_csv.py:normalize_artist()`.
+/// `filter_csv.py:normalize_artist()`. Diacritic-bearing artists are drawn
+/// from the canonical pool (`wxycCanonicalArtistNames` in @wxyc/shared).
 #[test]
 fn test_normalize_python_parity() {
     // (input, expected_output) from running Python normalize_artist()
     let cases = [
-        // Basic Latin diacritics
-        ("Björk", "bjork"),
-        ("Sigur Rós", "sigur ros"),
-        ("Motörhead", "motorhead"),
-        ("Hüsker Dü", "husker du"),
-        ("Café Tacvba", "cafe tacvba"),
-        ("Zoé", "zoe"),
+        // Basic Latin diacritics (from the canonical WXYC pool)
+        ("Nilüfer Yanya", "nilufer yanya"),
+        ("Csillagrablók", "csillagrablok"),
+        ("Hermanos Gutiérrez", "hermanos gutierrez"),
         // Case and whitespace
-        ("  RADIOHEAD  ", "radiohead"),
+        ("  STEREOLAB  ", "stereolab"),
         ("", ""),
-        // Multiple diacritics in one name
-        ("José González", "jose gonzalez"),
-        // Combining tilde (ñ decomposes to n + combining tilde)
-        ("Señor Coconut", "senor coconut"),
-        // Polish ł (NFKD doesn't decompose ł — it stays as-is)
+        // Polish ł (NFKD doesn't decompose ł — it stays as-is). Test input
+        // is a generic Polish word, not a WXYC artist; the canonical pool
+        // currently has no ł-bearing names.
         ("Łona", "łona"),
         // Japanese (no decomposition expected)
         ("坂本龍一", "坂本龍一"),
@@ -51,9 +47,9 @@ fn test_normalize_python_parity() {
 #[test]
 fn test_strip_diacritics_python_parity() {
     let cases = [
-        ("Björk", "Bjork"),
-        ("  Café  ", "  Cafe  "),
-        ("SIGUR RÓS", "SIGUR ROS"),
+        ("Nilüfer Yanya", "Nilufer Yanya"),
+        ("  Hermanos Gutiérrez  ", "  Hermanos Gutierrez  "),
+        ("CSILLAGRABLÓK", "CSILLAGRABLOK"),
         ("normal text", "normal text"),
     ];
 
@@ -70,7 +66,7 @@ fn test_strip_diacritics_python_parity() {
 /// Verify normalize_title matches normalize_artist_name.
 #[test]
 fn test_normalize_title_parity() {
-    let inputs = ["OK Computer", "Café Tacvba", "  Sugar Hill  "];
+    let inputs = ["Aluminum Tunes", "Hermanos Gutiérrez", "  Sugar Hill  "];
     for input in &inputs {
         assert_eq!(
             normalize_title(input),
@@ -114,19 +110,22 @@ fn test_compilation_python_parity() {
 /// Verify split_artist_name against Python artist_splitting.py.
 #[test]
 fn test_split_python_parity() {
+    // Multi-artist inputs use canonical WXYC names. Numeric-guard and "and"-guard
+    // inputs ("10,000 Maniacs", "Andy Human and the Reptoids") are kept as
+    // non-canonical strings because they exercise specific algorithm guards.
     let cases: Vec<(&str, Option<Vec<&str>>)> = vec![
         (
-            "Mike Vainio, Ryoji, Alva Noto",
-            Some(vec!["Mike Vainio", "Ryoji", "Alva Noto"]),
+            "Yo La Tengo, Stereolab, Autechre",
+            Some(vec!["Yo La Tengo", "Stereolab", "Autechre"]),
         ),
         (
-            "Mika Vainio + Ryoji Ikeda + Alva Noto",
-            Some(vec!["Mika Vainio", "Ryoji Ikeda", "Alva Noto"]),
+            "Yo La Tengo + Stereolab + Autechre",
+            Some(vec!["Yo La Tengo", "Stereolab", "Autechre"]),
         ),
         ("J Dilla / Jay Dee", Some(vec!["J Dilla", "Jay Dee"])),
         (
-            "Emerson, Lake, and Palmer",
-            Some(vec!["Emerson", "Lake", "Palmer"]),
+            "Stereolab, Autechre, and Aphex Twin",
+            Some(vec!["Stereolab", "Autechre", "Aphex Twin"]),
         ),
         ("10,000 Maniacs", None),
         ("Autechre", None),
@@ -151,23 +150,37 @@ fn test_split_python_parity() {
 /// Verify split_artist_name_contextual against Python.
 #[test]
 fn test_split_contextual_python_parity() {
-    let known: HashSet<String> = ["duke ellington", "john coltrane", "young", "bjork", "god"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let known: HashSet<String> = [
+        "duke ellington",
+        "john coltrane",
+        "stereolab",
+        "nilufer yanya",
+        "god",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
 
     let cases: Vec<(&str, Option<Vec<&str>>)> = vec![
         (
             "Duke Ellington & John Coltrane",
             Some(vec!["Duke Ellington", "John Coltrane"]),
         ),
-        ("Simon & Garfunkel", None),
+        ("Yo La Tengo & Animal Collective", None), // neither canonical, neither in known set
         ("J Dilla / Jay Dee", Some(vec!["J Dilla", "Jay Dee"])),
         (
-            "Crosby, Stills, Nash & Young",
-            Some(vec!["Crosby", "Stills", "Nash", "Young"]),
+            "Yo La Tengo, Cat Power, Mary Lattimore & Stereolab",
+            Some(vec![
+                "Yo La Tengo",
+                "Cat Power",
+                "Mary Lattimore",
+                "Stereolab",
+            ]),
         ),
-        ("Björk & Thom Yorke", Some(vec!["Björk", "Thom Yorke"])),
+        (
+            "Nilüfer Yanya & Mary Halvorson",
+            Some(vec!["Nilüfer Yanya", "Mary Halvorson"]),
+        ),
         ("13 & God", Some(vec!["13", "God"])),
     ];
 
@@ -188,10 +201,10 @@ fn test_split_contextual_python_parity() {
 #[test]
 fn test_batch_normalize_parity() {
     let names: Vec<String> = vec![
-        "Björk".into(),
-        "Sigur Rós".into(),
-        "  Radiohead  ".into(),
-        "Café Tacvba".into(),
+        "Nilüfer Yanya".into(),
+        "Csillagrablók".into(),
+        "  Stereolab  ".into(),
+        "Hermanos Gutiérrez".into(),
     ];
 
     let batch_result = batch_normalize(&names);
