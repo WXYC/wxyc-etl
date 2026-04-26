@@ -3,13 +3,7 @@
 /// Keywords indicating a compilation/soundtrack album.
 ///
 /// Checked as case-insensitive substring matches against artist names.
-pub const COMPILATION_KEYWORDS: &[&str] = &[
-    "various",
-    "soundtrack",
-    "compilation",
-    "v/a",
-    "v.a.",
-];
+pub const COMPILATION_KEYWORDS: &[&str] = &["various", "soundtrack", "compilation", "v/a", "v.a."];
 
 /// Check if an artist name indicates a compilation/soundtrack album.
 ///

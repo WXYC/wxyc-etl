@@ -54,9 +54,6 @@ fn split_artist_name(name: &str) -> Option<Vec<String>> {
 /// Tries context-free splits first, then ampersand splits when at least one
 /// component exists in `known_artists` (should contain normalized names).
 #[pyfunction]
-fn split_artist_name_contextual(
-    name: &str,
-    known_artists: HashSet<String>,
-) -> Option<Vec<String>> {
+fn split_artist_name_contextual(name: &str, known_artists: HashSet<String>) -> Option<Vec<String>> {
     wxyc_etl::text::split_artist_name_contextual(name, &known_artists)
 }

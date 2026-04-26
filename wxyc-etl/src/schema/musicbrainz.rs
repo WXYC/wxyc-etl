@@ -47,13 +47,8 @@ pub const MB_ARTIST_CREDIT_TABLE: &str = "mb_artist_credit";
 pub const MB_ARTIST_CREDIT_COLUMNS: &[&str] = &["id", "name", "artist_count"];
 
 pub const MB_ARTIST_CREDIT_NAME_TABLE: &str = "mb_artist_credit_name";
-pub const MB_ARTIST_CREDIT_NAME_COLUMNS: &[&str] = &[
-    "artist_credit",
-    "position",
-    "artist",
-    "name",
-    "join_phrase",
-];
+pub const MB_ARTIST_CREDIT_NAME_COLUMNS: &[&str] =
+    &["artist_credit", "position", "artist", "name", "join_phrase"];
 
 pub const MB_RELEASE_GROUP_TABLE: &str = "mb_release_group";
 pub const MB_RELEASE_GROUP_COLUMNS: &[&str] = &["id", "name", "artist_credit", "type"];

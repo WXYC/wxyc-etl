@@ -49,10 +49,8 @@ impl ColumnMapping {
 
     /// Return the indices of the unique key columns in the source columns list.
     pub fn unique_key_indices(&self) -> Option<Vec<usize>> {
-        self.unique_key.as_ref().map(|keys| {
-            keys.iter()
-                .filter_map(|k| self.source_index(k))
-                .collect()
-        })
+        self.unique_key
+            .as_ref()
+            .map(|keys| keys.iter().filter_map(|k| self.source_index(k)).collect())
     }
 }

@@ -30,7 +30,12 @@ pub fn split_artist_name(name: &str) -> Option<Vec<String>> {
 
     let result = dedupe_valid(components);
 
-    if result.is_empty() || (result.len() == 1 && !name.contains(", ") && !name.contains(" / ") && !name.contains(" + ")) {
+    if result.is_empty()
+        || (result.len() == 1
+            && !name.contains(", ")
+            && !name.contains(" / ")
+            && !name.contains(" + "))
+    {
         None
     } else {
         Some(result)
@@ -83,9 +88,9 @@ fn try_ampersand_split(name: &str, known_artists: &HashSet<String>) -> Option<Ve
     }
 
     // Check if any component is a known artist
-    let any_known = parts.iter().any(|p| {
-        known_artists.contains(&normalize_artist_name(p))
-    });
+    let any_known = parts
+        .iter()
+        .any(|p| known_artists.contains(&normalize_artist_name(p)));
 
     if !any_known {
         return None;
@@ -97,7 +102,11 @@ fn try_ampersand_split(name: &str, known_artists: &HashSet<String>) -> Option<Ve
         .map(String::from)
         .collect();
 
-    if valid.len() >= 2 { Some(valid) } else { None }
+    if valid.len() >= 2 {
+        Some(valid)
+    } else {
+        None
+    }
 }
 
 /// Try comma-based splitting with trailing-and handling and numeric guard.
@@ -133,7 +142,11 @@ fn try_delimiter_split<'a>(name: &'a str, delimiter: &str) -> Option<Vec<&'a str
     }
 
     let parts: Vec<&str> = name.split(delimiter).map(|p| p.trim()).collect();
-    if parts.len() >= 2 { Some(parts) } else { None }
+    if parts.len() >= 2 {
+        Some(parts)
+    } else {
+        None
+    }
 }
 
 /// Handle trailing "and X" in the last comma-split component.
@@ -203,7 +216,11 @@ mod tests {
     fn test_comma_split() {
         assert_eq!(
             split_artist_name("Mike Vainio, Ryoji, Alva Noto"),
-            Some(vec!["Mike Vainio".into(), "Ryoji".into(), "Alva Noto".into()])
+            Some(vec![
+                "Mike Vainio".into(),
+                "Ryoji".into(),
+                "Alva Noto".into()
+            ])
         );
     }
 
@@ -211,7 +228,11 @@ mod tests {
     fn test_plus_split() {
         assert_eq!(
             split_artist_name("Mika Vainio + Ryoji Ikeda + Alva Noto"),
-            Some(vec!["Mika Vainio".into(), "Ryoji Ikeda".into(), "Alva Noto".into()])
+            Some(vec![
+                "Mika Vainio".into(),
+                "Ryoji Ikeda".into(),
+                "Alva Noto".into()
+            ])
         );
     }
 
@@ -248,7 +269,11 @@ mod tests {
     fn test_trailing_ampersand_kept_without_context() {
         assert_eq!(
             split_artist_name("Crosby, Stills, Nash & Young"),
-            Some(vec!["Crosby".into(), "Stills".into(), "Nash & Young".into()])
+            Some(vec![
+                "Crosby".into(),
+                "Stills".into(),
+                "Nash & Young".into()
+            ])
         );
     }
 
@@ -369,7 +394,12 @@ mod tests {
         let known: HashSet<String> = ["young"].iter().map(|s| s.to_string()).collect();
         assert_eq!(
             split_artist_name_contextual("Crosby, Stills, Nash & Young", &known),
-            Some(vec!["Crosby".into(), "Stills".into(), "Nash".into(), "Young".into()])
+            Some(vec![
+                "Crosby".into(),
+                "Stills".into(),
+                "Nash".into(),
+                "Young".into()
+            ])
         );
     }
 
@@ -378,7 +408,11 @@ mod tests {
         let known: HashSet<String> = HashSet::new();
         assert_eq!(
             split_artist_name_contextual("Crosby, Stills, Nash & Young", &known),
-            Some(vec!["Crosby".into(), "Stills".into(), "Nash & Young".into()])
+            Some(vec![
+                "Crosby".into(),
+                "Stills".into(),
+                "Nash & Young".into()
+            ])
         );
     }
 

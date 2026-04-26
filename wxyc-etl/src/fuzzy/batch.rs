@@ -35,10 +35,7 @@ pub fn batch_classify_releases(
 ///
 /// Replaces the 11.5M-iteration Python loop in `filter_artists.py`.
 /// Returns a boolean vector: `true` if the normalized name is in `library_set`.
-pub fn batch_filter_artists(
-    artist_names: &[String],
-    library_set: &HashSet<String>,
-) -> Vec<bool> {
+pub fn batch_filter_artists(artist_names: &[String], library_set: &HashSet<String>) -> Vec<bool> {
     artist_names
         .iter()
         .map(|name| library_set.contains(&normalize_artist_name(name)))
@@ -86,16 +83,24 @@ mod tests {
         let config = ClassifyConfig::default();
         let artists: Vec<String> = (0..100)
             .map(|i| {
-                if i % 3 == 0 { "Juana Molina".into() }
-                else if i % 3 == 1 { "xyz".into() }
-                else { "Cat Power".into() }
+                if i % 3 == 0 {
+                    "Juana Molina".into()
+                } else if i % 3 == 1 {
+                    "xyz".into()
+                } else {
+                    "Cat Power".into()
+                }
             })
             .collect();
         let titles: Vec<String> = (0..100)
             .map(|i| {
-                if i % 3 == 0 { "DOGA".into() }
-                else if i % 3 == 1 { "qr".into() }
-                else { "Moon Pix".into() }
+                if i % 3 == 0 {
+                    "DOGA".into()
+                } else if i % 3 == 1 {
+                    "qr".into()
+                } else {
+                    "Moon Pix".into()
+                }
             })
             .collect();
         let results = batch_classify_releases(&artists, &titles, &index, &config);
@@ -109,12 +114,9 @@ mod tests {
 
     #[test]
     fn test_batch_filter_artists() {
-        let library_set: HashSet<String> = vec![
-            "autechre".to_string(),
-            "stereolab".to_string(),
-        ]
-        .into_iter()
-        .collect();
+        let library_set: HashSet<String> = vec!["autechre".to_string(), "stereolab".to_string()]
+            .into_iter()
+            .collect();
         let names = vec![
             "Autechre".to_string(),
             "Unknown".to_string(),
@@ -145,21 +147,39 @@ mod tests {
     fn build_wxyc_index() -> LibraryIndex {
         let pairs = vec![
             ("Autechre".to_string(), "Confield".to_string()),
-            ("Prince Jammy".to_string(), "...Destroys The Space Invaders".to_string()),
+            (
+                "Prince Jammy".to_string(),
+                "...Destroys The Space Invaders".to_string(),
+            ),
             ("Juana Molina".to_string(), "DOGA".to_string()),
             ("Stereolab".to_string(), "Aluminum Tunes".to_string()),
             ("Cat Power".to_string(), "Moon Pix".to_string()),
-            ("Jessica Pratt".to_string(), "On Your Own Love Again".to_string()),
+            (
+                "Jessica Pratt".to_string(),
+                "On Your Own Love Again".to_string(),
+            ),
             ("Chuquimamani-Condori".to_string(), "Edits".to_string()),
-            ("Duke Ellington & John Coltrane".to_string(), "Duke Ellington & John Coltrane".to_string()),
+            (
+                "Duke Ellington & John Coltrane".to_string(),
+                "Duke Ellington & John Coltrane".to_string(),
+            ),
             ("Sessa".to_string(), "Pequena Vertigem de Amor".to_string()),
             ("Anne Gillis".to_string(), "Eyry".to_string()),
-            ("Father John Misty".to_string(), "I Love You, Honeybear".to_string()),
+            (
+                "Father John Misty".to_string(),
+                "I Love You, Honeybear".to_string(),
+            ),
             ("Rafael Toral".to_string(), "Traveling Light".to_string()),
             ("Buck Meek".to_string(), "Gasoline".to_string()),
-            ("Nourished by Time".to_string(), "The Passionate Ones".to_string()),
+            (
+                "Nourished by Time".to_string(),
+                "The Passionate Ones".to_string(),
+            ),
             ("For Tracy Hyde".to_string(), "Hotel Insomnia".to_string()),
-            ("Rochelle Jordan".to_string(), "Through the Wall".to_string()),
+            (
+                "Rochelle Jordan".to_string(),
+                "Through the Wall".to_string(),
+            ),
             ("Large Professor".to_string(), "1st Class".to_string()),
         ];
         LibraryIndex::from_pairs(&pairs)
@@ -187,11 +207,31 @@ mod tests {
 
         let results = batch_classify_releases(&artists, &titles, &index, &config);
         assert_eq!(results.len(), 5);
-        assert_eq!(results[0], Classification::Keep, "Juana Molina / DOGA should be KEEP");
-        assert_ne!(results[1], Classification::Keep, "unknown should NOT be KEEP");
-        assert_eq!(results[2], Classification::Keep, "Cat Power / Moon Pix should be KEEP");
-        assert_eq!(results[3], Classification::Keep, "Autechre / Confield should be KEEP");
-        assert_ne!(results[4], Classification::Keep, "unknown should NOT be KEEP");
+        assert_eq!(
+            results[0],
+            Classification::Keep,
+            "Juana Molina / DOGA should be KEEP"
+        );
+        assert_ne!(
+            results[1],
+            Classification::Keep,
+            "unknown should NOT be KEEP"
+        );
+        assert_eq!(
+            results[2],
+            Classification::Keep,
+            "Cat Power / Moon Pix should be KEEP"
+        );
+        assert_eq!(
+            results[3],
+            Classification::Keep,
+            "Autechre / Confield should be KEEP"
+        );
+        assert_ne!(
+            results[4],
+            Classification::Keep,
+            "unknown should NOT be KEEP"
+        );
     }
 
     #[test]
@@ -281,7 +321,10 @@ mod tests {
 
         // Run again to verify determinism
         let results2 = batch_classify_releases(&artists, &titles, &index, &config);
-        assert_eq!(results, results2, "parallel classification should be deterministic");
+        assert_eq!(
+            results, results2,
+            "parallel classification should be deterministic"
+        );
     }
 
     #[test]

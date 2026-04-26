@@ -3,8 +3,7 @@ use std::collections::HashSet;
 use pyo3::prelude::*;
 
 use wxyc_etl::fuzzy::{
-    batch_classify_releases as rust_batch_classify,
-    batch_filter_artists as rust_batch_filter,
+    batch_classify_releases as rust_batch_classify, batch_filter_artists as rust_batch_filter,
     resolve, Classification, ClassifyConfig, LibraryIndex,
 };
 

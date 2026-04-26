@@ -196,9 +196,7 @@ pub fn parse_sql_values(data: &[u8]) -> Vec<Vec<SqlValue>> {
 pub fn find_values_start(line: &[u8]) -> Option<usize> {
     // Case-insensitive scan for "VALUES"
     let upper: Vec<u8> = line.iter().map(|b| b.to_ascii_uppercase()).collect();
-    let pos = upper
-        .windows(6)
-        .position(|w| w == b"VALUES")?;
+    let pos = upper.windows(6).position(|w| w == b"VALUES")?;
     // Find the first '(' after VALUES
     let after_values = pos + 6;
     for j in after_values..line.len() {
@@ -231,16 +229,16 @@ fn scan_table_lines<F>(path: &Path, table_name: &str, mut callback: F) -> Result
 where
     F: FnMut(&[u8]),
 {
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("cannot open {}", path.display()))?;
+    let file =
+        std::fs::File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
 
     let metadata = file.metadata()?;
     if metadata.len() == 0 {
         return Ok(());
     }
 
-    let mmap = unsafe { Mmap::map(&file) }
-        .with_context(|| format!("cannot mmap {}", path.display()))?;
+    let mmap =
+        unsafe { Mmap::map(&file) }.with_context(|| format!("cannot mmap {}", path.display()))?;
 
     let needle = format!("INSERT INTO `{table_name}`");
     let needle_bytes = needle.as_bytes();
@@ -257,9 +255,7 @@ where
         let line = &data[start..end];
 
         if line.len() >= needle_bytes.len()
-            && line
-                .windows(needle_bytes.len())
-                .any(|w| w == needle_bytes)
+            && line.windows(needle_bytes.len()).any(|w| w == needle_bytes)
         {
             callback(line);
         }
@@ -646,7 +642,10 @@ mod tests {
     #[test]
     fn test_parity_single_row_with_ints() {
         let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,2,3);");
-        assert_eq!(rows, vec![vec![SqlValue::Int(1), SqlValue::Int(2), SqlValue::Int(3)]]);
+        assert_eq!(
+            rows,
+            vec![vec![SqlValue::Int(1), SqlValue::Int(2), SqlValue::Int(3)]]
+        );
     }
 
     #[test]
@@ -666,8 +665,14 @@ mod tests {
     fn test_parity_multiple_rows() {
         let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'a'),(2,'b'),(3,'c');");
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0], vec![SqlValue::Int(1), SqlValue::Str("a".to_string())]);
-        assert_eq!(rows[2], vec![SqlValue::Int(3), SqlValue::Str("c".to_string())]);
+        assert_eq!(
+            rows[0],
+            vec![SqlValue::Int(1), SqlValue::Str("a".to_string())]
+        );
+        assert_eq!(
+            rows[2],
+            vec![SqlValue::Int(3), SqlValue::Str("c".to_string())]
+        );
     }
 
     #[test]
@@ -701,7 +706,10 @@ mod tests {
         let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'back\\\\slash');");
         assert_eq!(
             rows,
-            vec![vec![SqlValue::Int(1), SqlValue::Str("back\\slash".to_string())]]
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("back\\slash".to_string())
+            ]]
         );
     }
 
@@ -759,7 +767,10 @@ mod tests {
         let rows = parse_insert_line(b"INSERT INTO `FOO` VALUES (1,'hello, world');");
         assert_eq!(
             rows,
-            vec![vec![SqlValue::Int(1), SqlValue::Str("hello, world".to_string())]]
+            vec![vec![
+                SqlValue::Int(1),
+                SqlValue::Str("hello, world".to_string())
+            ]]
         );
     }
 

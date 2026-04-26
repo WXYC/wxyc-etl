@@ -17,9 +17,7 @@ pub fn levenshtein_ratio(s1: &str, s2: &str) -> f64 {
 
 /// Tokenize a string: split on whitespace and lowercase each token.
 fn tokenize(s: &str) -> Vec<String> {
-    s.split_whitespace()
-        .map(|t| t.to_lowercase())
-        .collect()
+    s.split_whitespace().map(|t| t.to_lowercase()).collect()
 }
 
 /// Sort tokens alphabetically and join with a single space.
@@ -31,7 +29,12 @@ fn sorted_tokens(s: &str) -> String {
 
 /// Join token parts, skipping empty strings.
 fn join_nonempty(parts: &[&str]) -> String {
-    parts.iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ")
+    parts
+        .iter()
+        .filter(|s| !s.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// SequenceMatcher-like ratio: `2 * LCS_length / (len1 + len2)`.

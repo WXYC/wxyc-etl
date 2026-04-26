@@ -87,18 +87,16 @@ where
     // Drop receiver so scanner's send() unblocks, preventing deadlock.
     drop(rx);
 
-    let scanner_result = handle
-        .join()
-        .map_err(|panic_payload| {
-            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                format!("scanner thread panicked: {}", s)
-            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                format!("scanner thread panicked: {}", s)
-            } else {
-                "scanner thread panicked (unknown payload)".to_string()
-            };
-            anyhow::anyhow!(msg)
-        })?;
+    let scanner_result = handle.join().map_err(|panic_payload| {
+        let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+            format!("scanner thread panicked: {}", s)
+        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+            format!("scanner thread panicked: {}", s)
+        } else {
+            "scanner thread panicked (unknown payload)".to_string()
+        };
+        anyhow::anyhow!(msg)
+    })?;
     if let Err(ref e) = loop_result {
         warn!("Pipeline processing failed: {}", e);
         return Err(loop_result.unwrap_err());
@@ -151,8 +149,7 @@ where
     let mut duplicates = 0usize;
 
     // Unpack dedup config (borrow checker needs the Option to be destructured)
-    let mut dedup_state: Option<(&mut HashSet<u64>, &dyn Fn(&[u8]) -> Option<u64>)> =
-        None;
+    let mut dedup_state: Option<(&mut HashSet<u64>, &dyn Fn(&[u8]) -> Option<u64>)> = None;
     // We need to store the DedupConfig to keep id_fn alive
     let mut dedup_cfg = dedup;
     if let Some(ref mut cfg) = dedup_cfg {
@@ -189,18 +186,16 @@ where
 
     drop(rx);
 
-    let scanner_result = handle
-        .join()
-        .map_err(|panic_payload| {
-            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                format!("scanner thread panicked: {}", s)
-            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                format!("scanner thread panicked: {}", s)
-            } else {
-                "scanner thread panicked (unknown payload)".to_string()
-            };
-            anyhow::anyhow!(msg)
-        })?;
+    let scanner_result = handle.join().map_err(|panic_payload| {
+        let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+            format!("scanner thread panicked: {}", s)
+        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+            format!("scanner thread panicked: {}", s)
+        } else {
+            "scanner thread panicked (unknown payload)".to_string()
+        };
+        anyhow::anyhow!(msg)
+    })?;
     if let Err(ref e) = loop_result {
         warn!("Byte pipeline processing failed: {}", e);
         return Err(loop_result.unwrap_err());
@@ -469,14 +464,19 @@ mod tests {
         };
 
         let wxyc_artists = vec![
-            "Autechre", "Stereolab", "Cat Power", "Juana Molina",
-            "Jessica Pratt", "Chuquimamani-Condori", "Sessa", "Anne Gillis",
-            "Father John Misty", "Rafael Toral", "Buck Meek",
+            "Autechre",
+            "Stereolab",
+            "Cat Power",
+            "Juana Molina",
+            "Jessica Pratt",
+            "Chuquimamani-Condori",
+            "Sessa",
+            "Anne Gillis",
+            "Father John Misty",
+            "Rafael Toral",
+            "Buck Meek",
         ];
-        let expected: Vec<String> = wxyc_artists
-            .iter()
-            .map(|s| s.to_uppercase())
-            .collect();
+        let expected: Vec<String> = wxyc_artists.iter().map(|s| s.to_uppercase()).collect();
 
         let (rx, handle) = start_scanner(
             move |tx| {
@@ -490,13 +490,8 @@ mod tests {
         );
 
         let mut output = StringOutput::new();
-        let stats = run_pipeline(
-            rx,
-            handle,
-            |s: &String| Some(s.to_uppercase()),
-            &mut output,
-        )
-        .unwrap();
+        let stats =
+            run_pipeline(rx, handle, |s: &String| Some(s.to_uppercase()), &mut output).unwrap();
 
         assert_eq!(stats.scanned, 11);
         assert_eq!(stats.written, 11);
@@ -598,9 +593,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(stats.written, 4);
-        assert_eq!(output.items, vec![
-            "0:Autechre", "1:Stereolab", "2:Cat Power", "3:Sessa",
-        ]);
+        assert_eq!(
+            output.items,
+            vec!["0:Autechre", "1:Stereolab", "2:Cat Power", "3:Sessa",]
+        );
     }
 
     #[test]
@@ -614,15 +610,9 @@ mod tests {
 
         let (rx, handle) = start_byte_scanner(
             |tx| {
-                tx.send(ByteBatch::from_slices(&[
-                    b"Autechre", b"Stereolab",
-                ]))?;
-                tx.send(ByteBatch::from_slices(&[
-                    b"Cat Power", b"Juana Molina",
-                ]))?;
-                tx.send(ByteBatch::from_slices(&[
-                    b"Sessa",
-                ]))?;
+                tx.send(ByteBatch::from_slices(&[b"Autechre", b"Stereolab"]))?;
+                tx.send(ByteBatch::from_slices(&[b"Cat Power", b"Juana Molina"]))?;
+                tx.send(ByteBatch::from_slices(&[b"Sessa"]))?;
                 Ok(5)
             },
             config,
@@ -643,7 +633,13 @@ mod tests {
         assert_eq!(stats.written, 5);
         assert_eq!(
             output.items,
-            vec!["Autechre", "Stereolab", "Cat Power", "Juana Molina", "Sessa"],
+            vec![
+                "Autechre",
+                "Stereolab",
+                "Cat Power",
+                "Juana Molina",
+                "Sessa"
+            ],
         );
     }
 
@@ -663,8 +659,8 @@ mod tests {
                 tx.send(ByteBatch::from_slices(&[
                     b"1:Autechre",
                     b"2:Stereolab",
-                    b"bad-data",        // no colon -> transform returns None
-                    b"1:Autechre Dup",  // duplicate ID 1
+                    b"bad-data",       // no colon -> transform returns None
+                    b"1:Autechre Dup", // duplicate ID 1
                     b"3:Cat Power",
                 ]))?;
                 Ok(5)
@@ -695,9 +691,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(stats.scanned, 5);
-        assert_eq!(stats.written, 3);     // Autechre, Stereolab, Cat Power
-        assert_eq!(stats.filtered, 1);    // bad-data
-        assert_eq!(stats.duplicates, 1);  // duplicate Autechre
+        assert_eq!(stats.written, 3); // Autechre, Stereolab, Cat Power
+        assert_eq!(stats.filtered, 1); // bad-data
+        assert_eq!(stats.duplicates, 1); // duplicate Autechre
         assert_eq!(output.items, vec!["Autechre", "Stereolab", "Cat Power"]);
     }
 }

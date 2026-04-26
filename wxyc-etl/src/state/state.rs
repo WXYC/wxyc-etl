@@ -89,8 +89,7 @@ impl PipelineState {
 
     /// Mark a step as completed.
     pub fn mark_completed(&mut self, step: &str) {
-        self.steps
-            .insert(step.to_string(), StepStatus::Completed);
+        self.steps.insert(step.to_string(), StepStatus::Completed);
     }
 
     /// Mark a step as failed with an error message.
@@ -155,8 +154,7 @@ impl PipelineState {
     pub fn load(path: &Path) -> Result<Self> {
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let raw: serde_json::Value =
-            serde_json::from_str(&text).context("parsing state JSON")?;
+        let raw: serde_json::Value = serde_json::from_str(&text).context("parsing state JSON")?;
 
         let version = raw
             .get("version")
@@ -167,18 +165,22 @@ impl PipelineState {
             Some(1) => Self::migrate_v1(&raw),
             Some(2) => Self::migrate_v2(&raw),
             Some(STATE_VERSION) => Self::load_v3(&raw),
-            Some(v) => bail!("Unsupported state file version {} (expected {})", v, STATE_VERSION),
+            Some(v) => bail!(
+                "Unsupported state file version {} (expected {})",
+                v,
+                STATE_VERSION
+            ),
             None => bail!("Missing version field in state file"),
         }
     }
 
     fn load_v3(raw: &serde_json::Value) -> Result<Self> {
-        let db_url = raw["database_url"].as_str().context("missing database_url")?;
+        let db_url = raw["database_url"]
+            .as_str()
+            .context("missing database_url")?;
         let csv_dir = raw["csv_dir"].as_str().context("missing csv_dir")?;
         let steps_val = raw.get("steps").context("missing steps")?;
-        let steps_map = steps_val
-            .as_object()
-            .context("steps must be an object")?;
+        let steps_map = steps_val.as_object().context("steps must be an object")?;
 
         let step_names: Vec<&str> = steps_map.keys().map(|k| k.as_str()).collect();
         let mut state = Self::new(db_url, csv_dir, &step_names);
@@ -197,7 +199,9 @@ impl PipelineState {
     /// - dedup or create_indexes completed → create_track_indexes completed
     /// - vacuum completed → set_logged completed (v1 used LOGGED tables throughout)
     fn migrate_v1(raw: &serde_json::Value) -> Result<Self> {
-        let db_url = raw["database_url"].as_str().context("missing database_url")?;
+        let db_url = raw["database_url"]
+            .as_str()
+            .context("missing database_url")?;
         let csv_dir = raw["csv_dir"].as_str().context("missing csv_dir")?;
         let steps_val = raw.get("steps").context("missing steps")?;
 
@@ -232,7 +236,9 @@ impl PipelineState {
     /// - All v2 steps map directly to their v3 equivalents
     /// - vacuum completed → set_logged completed (v2 used LOGGED tables throughout)
     fn migrate_v2(raw: &serde_json::Value) -> Result<Self> {
-        let db_url = raw["database_url"].as_str().context("missing database_url")?;
+        let db_url = raw["database_url"]
+            .as_str()
+            .context("missing database_url")?;
         let csv_dir = raw["csv_dir"].as_str().context("missing csv_dir")?;
         let steps_val = raw.get("steps").context("missing steps")?;
 

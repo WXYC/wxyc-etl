@@ -63,10 +63,7 @@ fn validate_table_name(name: &str) -> Result<()> {
     if name.is_empty() {
         anyhow::bail!("table name cannot be empty");
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         anyhow::bail!(
             "table name {:?} contains unsafe characters; only alphanumeric and underscore allowed",
             name
@@ -143,9 +140,7 @@ mod tests {
         assert_eq!(row.get::<_, i8>(0), b'p' as i8);
 
         // Clean up
-        client
-            .execute("DROP TABLE _pg_admin_test", &[])
-            .unwrap();
+        client.execute("DROP TABLE _pg_admin_test", &[]).unwrap();
     }
 
     #[test]
@@ -168,8 +163,6 @@ mod tests {
         vacuum_full(&mut client, &["_pg_vacuum_test"]).unwrap();
 
         // Clean up
-        client
-            .execute("DROP TABLE _pg_vacuum_test", &[])
-            .unwrap();
+        client.execute("DROP TABLE _pg_vacuum_test", &[]).unwrap();
     }
 }

@@ -41,16 +41,9 @@ mod tests {
 
     #[test]
     fn column_mapping_with_transform() {
-        let mut mapping = ColumnMapping::new(
-            vec!["format".into()],
-            vec!["format".into()],
-            vec![],
-            None,
-        );
-        mapping.add_transform(
-            "format",
-            Box::new(|v| v.map(|s| s.to_uppercase())),
-        );
+        let mut mapping =
+            ColumnMapping::new(vec!["format".into()], vec!["format".into()], vec![], None);
+        mapping.add_transform("format", Box::new(|v| v.map(|s| s.to_uppercase())));
         let transform = mapping.transforms.get("format").unwrap();
         assert_eq!(transform(Some("vinyl")), Some("VINYL".to_string()));
         assert_eq!(transform(None), None);

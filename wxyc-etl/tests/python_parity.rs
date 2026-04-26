@@ -115,10 +115,19 @@ fn test_compilation_python_parity() {
 #[test]
 fn test_split_python_parity() {
     let cases: Vec<(&str, Option<Vec<&str>>)> = vec![
-        ("Mike Vainio, Ryoji, Alva Noto", Some(vec!["Mike Vainio", "Ryoji", "Alva Noto"])),
-        ("Mika Vainio + Ryoji Ikeda + Alva Noto", Some(vec!["Mika Vainio", "Ryoji Ikeda", "Alva Noto"])),
+        (
+            "Mike Vainio, Ryoji, Alva Noto",
+            Some(vec!["Mike Vainio", "Ryoji", "Alva Noto"]),
+        ),
+        (
+            "Mika Vainio + Ryoji Ikeda + Alva Noto",
+            Some(vec!["Mika Vainio", "Ryoji Ikeda", "Alva Noto"]),
+        ),
         ("J Dilla / Jay Dee", Some(vec!["J Dilla", "Jay Dee"])),
-        ("Emerson, Lake, and Palmer", Some(vec!["Emerson", "Lake", "Palmer"])),
+        (
+            "Emerson, Lake, and Palmer",
+            Some(vec!["Emerson", "Lake", "Palmer"]),
+        ),
         ("10,000 Maniacs", None),
         ("Autechre", None),
         ("Duke Ellington & John Coltrane", None),
@@ -128,8 +137,9 @@ fn test_split_python_parity() {
 
     for (input, expected) in &cases {
         let result = split_artist_name(input);
-        let expected_owned: Option<Vec<String>> =
-            expected.as_ref().map(|v| v.iter().map(|s| s.to_string()).collect());
+        let expected_owned: Option<Vec<String>> = expected
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.to_string()).collect());
         assert_eq!(
             result, expected_owned,
             "split_artist_name({:?}) failed",
@@ -147,18 +157,25 @@ fn test_split_contextual_python_parity() {
         .collect();
 
     let cases: Vec<(&str, Option<Vec<&str>>)> = vec![
-        ("Duke Ellington & John Coltrane", Some(vec!["Duke Ellington", "John Coltrane"])),
+        (
+            "Duke Ellington & John Coltrane",
+            Some(vec!["Duke Ellington", "John Coltrane"]),
+        ),
         ("Simon & Garfunkel", None),
         ("J Dilla / Jay Dee", Some(vec!["J Dilla", "Jay Dee"])),
-        ("Crosby, Stills, Nash & Young", Some(vec!["Crosby", "Stills", "Nash", "Young"])),
+        (
+            "Crosby, Stills, Nash & Young",
+            Some(vec!["Crosby", "Stills", "Nash", "Young"]),
+        ),
         ("Björk & Thom Yorke", Some(vec!["Björk", "Thom Yorke"])),
         ("13 & God", Some(vec!["13", "God"])),
     ];
 
     for (input, expected) in &cases {
         let result = split_artist_name_contextual(input, &known);
-        let expected_owned: Option<Vec<String>> =
-            expected.as_ref().map(|v| v.iter().map(|s| s.to_string()).collect());
+        let expected_owned: Option<Vec<String>> = expected
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.to_string()).collect());
         assert_eq!(
             result, expected_owned,
             "split_artist_name_contextual({:?}) failed",

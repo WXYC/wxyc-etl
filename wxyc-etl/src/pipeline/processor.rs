@@ -73,9 +73,8 @@ mod tests {
         use crate::pipeline::scanner::ByteBatch;
 
         let batch = ByteBatch::new();
-        let results: Vec<String> = process_byte_batch(&batch, |bytes| {
-            String::from_utf8_lossy(bytes).to_string()
-        });
+        let results: Vec<String> =
+            process_byte_batch(&batch, |bytes| String::from_utf8_lossy(bytes).to_string());
         assert!(results.is_empty());
     }
 }

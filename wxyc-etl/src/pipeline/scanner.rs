@@ -57,10 +57,7 @@ impl<T: Send + Sync + 'static> BatchSender<T> {
 
     fn flush(&mut self) -> Result<()> {
         if !self.pending.is_empty() {
-            let items = std::mem::replace(
-                &mut self.pending,
-                Vec::with_capacity(self.batch_size),
-            );
+            let items = std::mem::replace(&mut self.pending, Vec::with_capacity(self.batch_size));
             self.tx.send(Batch { items })?;
         }
         Ok(())
@@ -301,14 +298,18 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded::<Batch<String>>(4);
         {
             let mut sender = BatchSender::new(tx, 10); // batch_size=10
-            // Send only 3 items, below the batch threshold
+                                                       // Send only 3 items, below the batch threshold
             sender.send_item("Autechre".to_string()).unwrap();
             sender.send_item("Stereolab".to_string()).unwrap();
             sender.send_item("Cat Power".to_string()).unwrap();
             // sender drops here, triggering flush
         }
         let batches: Vec<Batch<String>> = rx.iter().collect();
-        assert_eq!(batches.len(), 1, "remaining items should be flushed on drop");
+        assert_eq!(
+            batches.len(),
+            1,
+            "remaining items should be flushed on drop"
+        );
         assert_eq!(batches[0].items.len(), 3);
         assert_eq!(batches[0].items[0], "Autechre");
         assert_eq!(batches[0].items[1], "Stereolab");
@@ -428,7 +429,7 @@ mod tests {
         batch.push_slice(b"DOGA");
 
         // Offsets should be contiguous
-        assert_eq!(batch.offsets[0], (0, 12));  // "Juana Molina" = 12 bytes
+        assert_eq!(batch.offsets[0], (0, 12)); // "Juana Molina" = 12 bytes
         assert_eq!(batch.offsets[1], (12, 16)); // "DOGA" = 4 bytes
         assert_eq!(batch.data.len(), 16);
     }
@@ -442,8 +443,14 @@ mod tests {
             channel_capacity: 4,
         };
         let wxyc_artists = vec![
-            "Autechre", "Stereolab", "Cat Power", "Juana Molina",
-            "Jessica Pratt", "Chuquimamani-Condori", "Sessa", "Anne Gillis",
+            "Autechre",
+            "Stereolab",
+            "Cat Power",
+            "Juana Molina",
+            "Jessica Pratt",
+            "Chuquimamani-Condori",
+            "Sessa",
+            "Anne Gillis",
         ];
         let expected: Vec<String> = wxyc_artists.iter().map(|s| s.to_string()).collect();
 

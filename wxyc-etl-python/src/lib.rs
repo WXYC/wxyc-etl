@@ -1,12 +1,12 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModuleMethods;
 
-mod text;
-mod parser;
-mod state;
-mod import_utils;
-mod schema;
 mod fuzzy;
+mod import_utils;
+mod parser;
+mod schema;
+mod state;
+mod text;
 
 /// Register a submodule and add it to sys.modules so `from wxyc_etl.X import Y` works.
 fn register_submodule(
