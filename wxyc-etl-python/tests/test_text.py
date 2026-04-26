@@ -18,6 +18,11 @@ from wxyc_etl import text
         ("Nilüfer Yanya", "nilufer yanya"),
         ("Csillagrablók", "csillagrablok"),
         ("Hermanos Gutiérrez", "hermanos gutierrez"),
+        # ñ (combining-tilde decomposition) — canonical from @wxyc/shared#81
+        ("Sonido Dueñez", "sonido duenez"),
+        # Multi-diacritic Turkish — canonical from @wxyc/shared#81. Note:
+        # ı (dotless i) does not decompose under NFKD; only ş is stripped.
+        ("Aşıq Altay", "asıq altay"),
     ],
     ids=[
         "lowercase",
@@ -28,6 +33,8 @@ from wxyc_etl import text
         "nilufer_yanya",
         "csillagrablok",
         "hermanos_gutierrez",
+        "sonido_duenez",
+        "asiq_altay",
     ],
 )
 def test_normalize_artist_name(input_name, expected):
