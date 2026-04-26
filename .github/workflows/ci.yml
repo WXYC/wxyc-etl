@@ -82,3 +82,20 @@ jobs:
         run: pytest wxyc-etl-python/tests/ -v
       - name: Run wheel lifecycle test
         run: python tests/test_wheel_lifecycle.py --skip-build
+
+  marker-sync-self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml pytest
+      - name: Unit-test the script
+        run: pytest scripts/test_check_marker_ci_sync.py -v
+      - name: Dogfood the script on this repo
+        run: |
+          python scripts/check_marker_ci_sync.py \
+            --repo-path wxyc-etl-python \
+            --workflows-dir .github/workflows \
+            --tests-dir wxyc-etl-python/tests

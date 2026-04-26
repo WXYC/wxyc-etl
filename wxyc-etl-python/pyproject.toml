@@ -13,15 +13,10 @@ dev = ["pytest>=7.0"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 
+# ci-sync-skip: perf reason: benchmarks require a release-built wheel and are run manually
 [tool.pytest.ini_options]
 markers = [
-    "unit: pure logic tests, no external dependencies",
-    "postgres: needs PostgreSQL (gated by DATABASE_URL_TEST)",
-    "integration: needs external service or fixture data",
-    "e2e: full pipeline end-to-end test",
-    "parity: old vs new implementation comparison",
-    "slow: marks tests as slow",
-    "perf: performance benchmarks (require release build)",
+    "perf: performance benchmarks (require release build, manual run only)",
 ]
-addopts = "-m 'not integration and not postgres and not e2e and not parity and not slow and not perf'"
+addopts = "-m 'not perf'"
 testpaths = ["tests"]
