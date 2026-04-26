@@ -22,6 +22,13 @@ fn test_normalize_python_parity() {
         ("Nilüfer Yanya", "nilufer yanya"),
         ("Csillagrablók", "csillagrablok"),
         ("Hermanos Gutiérrez", "hermanos gutierrez"),
+        // ñ — combining-tilde decomposition path (canonical, added in @wxyc/shared#81)
+        ("Sonido Dueñez", "sonido duenez"),
+        // Multi-diacritic single name — exercises the stripping loop on > 1
+        // combining mark in one input. Aşıq Altay is canonical (added in
+        // @wxyc/shared#81) and has both ş (s + cedilla) and ı (dotless i,
+        // does not decompose under NFKD).
+        ("Aşıq Altay", "asıq altay"),
         // Case and whitespace
         ("  STEREOLAB  ", "stereolab"),
         ("", ""),
