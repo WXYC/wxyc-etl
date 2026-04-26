@@ -17,7 +17,7 @@ perf = pytest.mark.perf
 @perf
 def test_batch_normalize_performance():
     """100K normalizations should complete in under 200ms (release build)."""
-    names = ["Björk"] * 100_000
+    names = ["Nilüfer Yanya"] * 100_000
     start = time.time()
     results = text.batch_normalize(names)
     elapsed = time.time() - start
@@ -30,7 +30,7 @@ def test_normalize_individual_calls():
     """100K individual normalize calls should complete in under 500ms."""
     start = time.time()
     for _ in range(100_000):
-        text.normalize_artist_name("Björk")
+        text.normalize_artist_name("Nilüfer Yanya")
     elapsed = time.time() - start
     assert elapsed < 0.5, f"100K normalize calls took {elapsed:.3f}s"
 
@@ -38,7 +38,7 @@ def test_normalize_individual_calls():
 @perf
 def test_batch_normalize_million():
     """1M normalizations via batch should complete in under 2s (release build)."""
-    names = ["Sigur Rós"] * 1_000_000
+    names = ["Csillagrablók"] * 1_000_000
     start = time.time()
     results = text.batch_normalize(names)
     elapsed = time.time() - start

@@ -135,8 +135,8 @@ mod tests {
 
     #[test]
     fn test_batch_filter_artists_diacritics() {
-        let library_set: HashSet<String> = vec!["bjork".to_string()].into_iter().collect();
-        let names = vec!["Björk".to_string(), "bjork".to_string()];
+        let library_set: HashSet<String> = vec!["nilufer yanya".to_string()].into_iter().collect();
+        let names = vec!["Nilüfer Yanya".to_string(), "nilüfer yanya".to_string()];
         let results = batch_filter_artists(&names, &library_set);
         assert_eq!(results, vec![true, true]);
     }

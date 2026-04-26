@@ -221,13 +221,13 @@ mod tests {
     fn test_artist_filter_from_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("artists.txt");
-        fs::write(&path, "Radiohead\nBjörk\n  Joy Division  \n\n").unwrap();
+        fs::write(&path, "Stereolab\nNilüfer Yanya\n  Yo La Tengo  \n\n").unwrap();
 
         let filter = ArtistFilter::from_file(&path).unwrap();
         assert_eq!(filter.len(), 3);
-        assert!(filter.matches_any(["Radiohead"].iter().copied()));
-        assert!(filter.matches_any(["Björk"].iter().copied()));
-        assert!(filter.matches_any(["joy division"].iter().copied()));
+        assert!(filter.matches_any(["Stereolab"].iter().copied()));
+        assert!(filter.matches_any(["Nilüfer Yanya"].iter().copied()));
+        assert!(filter.matches_any(["yo la tengo"].iter().copied()));
         assert!(!filter.matches_any(["Unknown Artist"].iter().copied()));
     }
 
@@ -235,10 +235,10 @@ mod tests {
     fn test_artist_filter_matches_any() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("artists.txt");
-        fs::write(&path, "Radiohead\nBjörk\n").unwrap();
+        fs::write(&path, "Stereolab\nNilüfer Yanya\n").unwrap();
 
         let filter = ArtistFilter::from_file(&path).unwrap();
-        assert!(filter.matches_any(["Unknown", "Radiohead"].iter().copied()));
+        assert!(filter.matches_any(["Unknown", "Stereolab"].iter().copied()));
         assert!(!filter.matches_any(["Unknown", "Other"].iter().copied()));
     }
 
@@ -247,16 +247,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let lib_path = dir.path().join("artists.txt");
-        fs::write(&lib_path, "Puff Daddy\n").unwrap();
+        fs::write(&lib_path, "Madlib\n").unwrap();
 
         let alias_path = dir.path().join("artist_alias.csv");
         fs::write(
             &alias_path,
             "artist_id,artist_name,alias_name\n\
-             123,P. Diddy,P Diddy\n\
-             123,P. Diddy,Puff Daddy\n\
-             123,P. Diddy,Sean Combs\n\
-             123,P. Diddy,Diddy\n",
+             123,Madlib,Quasimoto\n\
+             123,Madlib,Madlib\n\
+             123,Madlib,Lord Quas\n\
+             123,Madlib,DJ Rels\n",
         )
         .unwrap();
 
@@ -266,8 +266,8 @@ mod tests {
         assert!(filter.has_aliases());
 
         // "P. Diddy" doesn't match directly, but alias lookup finds "Puff Daddy"
-        assert!(!filter.matches_any(["P. Diddy"].iter().copied()));
-        assert!(filter.matches_any_with_ids(&[(123, "P. Diddy")]));
+        assert!(!filter.matches_any(["Quasimoto"].iter().copied()));
+        assert!(filter.matches_any_with_ids(&[(123, "Quasimoto")]));
 
         // Unknown artist doesn't match
         assert!(!filter.matches_any_with_ids(&[(999, "Unknown")]));
@@ -277,10 +277,10 @@ mod tests {
     fn test_matches_any_with_ids_canonical_name_still_works() {
         let dir = tempfile::tempdir().unwrap();
         let lib_path = dir.path().join("artists.txt");
-        fs::write(&lib_path, "Radiohead\n").unwrap();
+        fs::write(&lib_path, "Stereolab\n").unwrap();
 
         let filter = ArtistFilter::from_file(&lib_path).unwrap();
-        assert!(filter.matches_any_with_ids(&[(300, "Radiohead")]));
+        assert!(filter.matches_any_with_ids(&[(300, "Stereolab")]));
         assert!(!filter.matches_any_with_ids(&[(300, "Unknown")]));
     }
 }

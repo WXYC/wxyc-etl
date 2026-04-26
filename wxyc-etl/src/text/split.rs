@@ -382,10 +382,10 @@ mod tests {
 
     #[test]
     fn test_contextual_known_artists_normalized() {
-        let known: HashSet<String> = ["bjork"].iter().map(|s| s.to_string()).collect();
+        let known: HashSet<String> = ["nilufer yanya"].iter().map(|s| s.to_string()).collect();
         assert_eq!(
-            split_artist_name_contextual("Björk & Thom Yorke", &known),
-            Some(vec!["Björk".into(), "Thom Yorke".into()])
+            split_artist_name_contextual("Nilüfer Yanya & Mary Halvorson", &known),
+            Some(vec!["Nilüfer Yanya".into(), "Mary Halvorson".into()])
         );
     }
 
