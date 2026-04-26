@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check
+      # Starter clippy config. The -A allows below correspond to existing
+      # warning categories at CI introduction; tighten over time by removing
+      # allows and fixing the underlying code.
+      - name: cargo clippy (workspace)
+        run: |
+          cargo clippy --workspace --all-targets -- \
+            -D warnings \
+            -A clippy::approx_constant \
+            -A clippy::type_complexity \
+            -A clippy::needless_borrows_for_generic_args \
+            -A clippy::new_without_default \
+            -A clippy::needless_range_loop \
+            -A clippy::module_inception \
+            -A clippy::manual_find \
+            -A clippy::manual_is_multiple_of
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run Rust tests (PG tests skip without TEST_DATABASE_URL)
+        run: cargo test --workspace
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: wxyc_etl
+          POSTGRES_PASSWORD: wxyc_etl
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wxyc_etl"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run Rust tests with PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql://wxyc_etl:wxyc_etl@localhost:5433/postgres
+        run: cargo test --workspace -- --test-threads=1
+
+  python-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install maturin and pytest
+        run: pip install maturin pytest
+      - name: Build and install the wheel
+        working-directory: wxyc-etl-python
+        run: |
+          maturin build --release
+          pip install ../target/wheels/wxyc_etl-*.whl
+      - name: Run Python wheel tests
+        run: pytest wxyc-etl-python/tests/ -v
+      - name: Run wheel lifecycle test
+        run: python tests/test_wheel_lifecycle.py --skip-build
