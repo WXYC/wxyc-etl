@@ -1,0 +1,113 @@
+# wxyc-etl
+
+Shared Rust crate (with PyO3 Python bindings) that supplies the cross-cutting primitives used by every WXYC ETL repo: text normalization, fuzzy matching, PostgreSQL bulk loading, a parallel pipeline framework, a MySQL-dump parser, schema constants, and JSON state tracking.
+
+## Workspace Layout
+
+Cargo workspace with two members:
+
+| Crate | Path | Purpose |
+|---|---|---|
+| `wxyc-etl` | `wxyc-etl/` | Pure Rust library. Used by other Rust ETL repos (discogs-xml-converter, musicbrainz-cache, wikidata-json-filter) via `[dependencies] wxyc-etl = { path = "../wxyc-etl" }`. |
+| `wxyc-etl-python` | `wxyc-etl-python/` | PyO3 extension that re-exports a curated subset to Python as `wxyc_etl.text`, `wxyc_etl.fuzzy`, `wxyc_etl.parser`, `wxyc_etl.state`, `wxyc_etl.import_utils`, `wxyc_etl.schema`. Built with maturin. |
+
+The Python crate lives in the same workspace so it shares the lockfile with the Rust crate it wraps; this guarantees the bindings always match the underlying library at the byte level.
+
+## Modules (`wxyc-etl/src/`)
+
+| Module | Purpose |
+|---|---|
+| `text` | NFKD-based artist-name normalization (`normalize_artist_name`, `strip_diacritics`, `normalize_title`); compilation detection (`is_compilation_artist`); multi-artist split with optional contextual hints (`split_artist_name`, `split_artist_name_contextual`); batch variants in `text::batch`; file-backed `ArtistFilter` / `TitleFilter` in `text::filter`. |
+| `pg` | `BatchCopier` and friends for `COPY TEXT` bulk loading, FK-ordered flush, dedup tracking, admin helpers (`SET UNLOGGED` / `SET LOGGED`). Backed by sync `postgres` crate. |
+| `pipeline` | Generic scanner → rayon → writer parallel framework (`PipelineRunner`, `PipelineOutput` trait). Used by the streaming Rust filters to pipe huge dumps through worker pools without building intermediate vectors. |
+| `csv_writer` | `MultiCsvWriter` — write to many CSVs in parallel from a single producer. |
+| `sqlite` | SQLite helpers: FTS5 setup, performance pragmas, batch insert wrappers. |
+| `state` | `PipelineState` — JSON state file at the workspace root, tracks completed pipeline steps for `--resume`. `state::introspect` derives a state file from DB introspection (schema present, row counts, index presence) when no file exists. |
+| `import` | Artist/track dedup helpers and column mapping for the discogs-etl import path. |
+| `schema` | Table-name constants for the consumer databases (`schema::library`, `schema::discogs`, `schema::musicbrainz`, `schema::wikidata`, `schema::entity`). Single source of truth so consumer Rust code never hard-codes table names. |
+| `fuzzy` | `LibraryIndex` (token-set + Jaro-Winkler scoring), batch filter via normalize + set lookup, classification metrics. |
+| `parser` | Streaming MySQL `INSERT INTO ... VALUES (...)` tuple parser used to read tubafrenzy SQL dumps without loading them into memory. |
+
+`lib.rs` re-exports each module unchanged: consumers do `use wxyc_etl::text::normalize_artist_name`.
+
+## Python Bindings (`wxyc-etl-python/`)
+
+The PyO3 crate registers each submodule under the `wxyc_etl` Python package so `from wxyc_etl.text import normalize_artist_name` works. Currently exposed: `text`, `parser`, `state`, `import_utils`, `schema`, `fuzzy`. The `pg`, `pipeline`, `csv_writer`, and `sqlite` modules are not exposed — Python consumers don't need them (they have psycopg/asyncpg directly).
+
+Submodule registration also writes into `sys.modules` so Python's `from X.Y import Z` form resolves correctly (PyO3 doesn't do this by default).
+
+### Install for downstream Python repos
+
+From the consuming repo (e.g. discogs-etl, semantic-index):
+
+```bash
+pip install -e ../wxyc-etl/wxyc-etl-python
+```
+
+The `-e` editable install rebuilds the wheel via maturin on every `pip install`, so changes to the Rust source are picked up the next time you reinstall.
+
+### Pure-Python fallback
+
+Downstream consumers that have a Python implementation of the same logic (e.g. discogs-etl's `scripts/import_csv.py` and `scripts/verify_cache.py`) can force the slower Python path by setting:
+
+```bash
+WXYC_ETL_NO_RUST=1
+```
+
+Useful when debugging a Rust-vs-Python parity issue or when the wheel isn't built. The `_HAS_WXYC_ETL and not os.environ.get("WXYC_ETL_NO_RUST")` guard pattern is the convention.
+
+## Testing
+
+```bash
+# Rust unit tests (350 in wxyc-etl/src/)
+cargo test --lib
+
+# Rust integration tests (in wxyc-etl/tests/)
+cargo test --workspace
+
+# Python binding tests (require an editable install of wxyc-etl-python)
+cd wxyc-etl-python && pytest
+
+# Wheel lifecycle test (build, install, import, basic smoke)
+python tests/test_wheel_lifecycle.py
+```
+
+Notable test files:
+
+- `wxyc-etl/tests/python_parity.rs` — locks Rust output against expected values produced by the legacy Python implementations in the consumer repos. Editing `text::normalize_artist_name` requires updating these expectations.
+- `wxyc-etl/tests/integration_modules.rs` — cross-module integration scenarios.
+- `wxyc-etl/tests/pg_error_tests.rs` — pipeline error / panic propagation against PostgreSQL. Some tests gate on `TEST_DATABASE_URL`; others (`pipeline_error_tests::test_scanner_panic_does_not_deadlock_writer`) are flaky on local macOS but pass in CI.
+- `wxyc-etl/tests/panic_recovery.rs` — verifies the pipeline runner doesn't deadlock when a worker panics.
+- `wxyc-etl-python/tests/test_performance.py` — marked `@perf`, requires release-built wheel.
+
+Test fixtures use canonical WXYC artist names from the org-level convention. Diacritic-bearing inputs are drawn from `wxycCanonicalArtistNames` in `@wxyc/shared` (Nilüfer Yanya for ü, Csillagrablók for ó, Hermanos Gutiérrez for é). Non-canonical inputs (`10,000 Maniacs`, `Andy Human and the Reptoids`, `Łona`, CJK strings) are kept only where they exercise specific algorithm guards or Unicode behaviors with no canonical analogue.
+
+## CI (`.github/workflows/ci.yml`)
+
+Four jobs on push to `main` and on PR:
+
+| Job | What |
+|---|---|
+| `lint` | `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` (with a small allow-list for established patterns; tighten over time). |
+| `test` | `cargo test --workspace`. PG-gated tests skip without `TEST_DATABASE_URL`. |
+| `test-postgres` | `cargo test --workspace -- --test-threads=1` against a Postgres 16 service container on port 5433. |
+| `python-wheel` | maturin builds a release wheel, pip installs it, runs `pytest wxyc-etl-python/tests/`, then runs the wheel-lifecycle smoke test. |
+
+## Consumers
+
+Repos that depend on wxyc-etl by Cargo path or via the Python wheel:
+
+- **discogs-xml-converter** (Rust) — `pipeline`, `text`, `csv_writer`
+- **musicbrainz-cache** (Rust) — `pipeline`, `text`, `pg`, `schema`, `state`
+- **wikidata-json-filter** (Rust) — `pipeline`, `csv_writer`
+- **discogs-etl** (Python via PyO3) — `text`, `state`, `import_utils`, `parser`, `schema`
+- **semantic-index** (Python via PyO3) — `text`, `fuzzy`, `parser`, `schema`
+
+Any change that alters a public signature in a module these consumers use should be coordinated with the consumer repo (a follow-up PR), since this crate isn't versioned to crates.io / PyPI — they all pin to the path/source.
+
+## Conventions
+
+- Single-line paragraphs in commit messages and Markdown (org-wide rule).
+- TDD when adding new behavior: failing test first, then the implementation.
+- When a Python-side parity test changes (`tests/python_parity.rs`), the Python expectation in the consumer repo's tests should change in lockstep.
+- Use canonical WXYC artist names in test fixtures (see org-level `CLAUDE.md`); avoid Radiohead, The Beatles, Björk, etc.
