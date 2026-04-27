@@ -215,6 +215,34 @@ Repos that depend on wxyc-etl by Cargo path or via the Python wheel:
 
 Any change that alters a public signature in a module these consumers use should be coordinated with the consumer repo (a follow-up PR), since this crate isn't versioned to crates.io / PyPI — they all pin to the path/source.
 
+## Scheduling Policy
+
+Every WXYC ETL fits one of three buckets. The bucket determines the scheduler — we don't mix.
+
+| Workload type | Scheduler | Why |
+|---|---|---|
+| Stateless ETL (cache rebuilds, daily syncs) | GitHub Actions cron | Free, observable, retried by re-running the workflow; no host to maintain |
+| Continuous worker / poller | Railway service | Long-running with restart-on-crash; cheap for steady traffic |
+| Periodic job tightly coupled to a service's API | In-process scheduler in that service | Avoids network hop and shared deploy unit with the API |
+
+Add `workflow_dispatch:` to any cron-driven workflow so it can be invoked manually for ad-hoc runs without re-tagging or merging.
+
+### ETL audit (as of 2026-04-27)
+
+| ETL | Workload | Today | Target |
+|---|---|---|---|
+| `discogs-etl` daily library sync | stateless | GH Actions cron | ✓ on policy |
+| `discogs-etl` monthly cache rebuild | stateless | manual | GH Actions cron + `workflow_dispatch` (issue #118) |
+| `musicbrainz-cache` rebuild | stateless | manual | GH Actions cron + `workflow_dispatch` (issue #26) |
+| `wikidata-cache` rebuild | stateless | manual | GH Actions cron + `workflow_dispatch` (issue #17) |
+| `semantic-index` nightly sync | API-coupled | in-process scheduler | ✓ on policy |
+| `Backend-Service` `jobs/flowsheet-etl/` | continuous worker | EC2 polling | ✓ on policy (Railway-equivalent) |
+| `discogs-xml-converter` | invoked by `discogs-etl` | manual / on-demand | no independent schedule needed |
+| `semantic-index` AcousticBrainz import | one-shot | manual | no schedule needed |
+| `semantic-index` audio archive processing | manual | manual | no schedule needed |
+
+Outliers tracked under epic [wxyc-etl#47](https://github.com/WXYC/wxyc-etl/issues/47).
+
 ## Conventions
 
 - Single-line paragraphs in commit messages and Markdown (org-wide rule).
