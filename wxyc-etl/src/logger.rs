@@ -89,11 +89,16 @@ pub fn init(config: LoggerConfig) -> LoggerGuard {
         let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
+        // Write to stderr so the contract matches `env_logger` and POSIX
+        // convention: stdout is for the program's data output, stderr is for
+        // diagnostics. Existing tests across consumer repos read stderr for
+        // log lines and break if logs land on stdout instead.
         let json_layer = tracing_subscriber::fmt::layer()
             .json()
             .with_current_span(true)
             .with_span_list(false)
-            .with_target(true);
+            .with_target(true)
+            .with_writer(std::io::stderr);
 
         let registry = tracing_subscriber::registry()
             .with(env_filter)
