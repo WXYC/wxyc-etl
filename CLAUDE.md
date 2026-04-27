@@ -27,14 +27,75 @@ The Python crate lives in the same workspace so it shares the lockfile with the 
 | `schema` | Table-name constants for the consumer databases (`schema::library`, `schema::discogs`, `schema::musicbrainz`, `schema::wikidata`, `schema::entity`). Single source of truth so consumer Rust code never hard-codes table names. |
 | `fuzzy` | `LibraryIndex` (token-set + Jaro-Winkler scoring), batch filter via normalize + set lookup, classification metrics. |
 | `parser` | Streaming MySQL `INSERT INTO ... VALUES (...)` tuple parser used to read tubafrenzy SQL dumps without loading them into memory. |
+| `logger` | Sentry + structured JSON logging (`tracing` + `tracing-subscriber` JSON). See **Observability** below. |
+
+## Observability
+
+Every ETL binary should call `wxyc_etl::logger::init` (Rust) or `wxyc_etl.logger.init_logger` (Python) once at startup. Both emit one JSON object per line on stderr with four required tags so logs are uniformly aggregatable across pipelines:
+
+| Tag | Source | Example |
+|---|---|---|
+| `repo` | passed to `init` | `"musicbrainz-cache"` |
+| `tool` | passed to `init` | `"musicbrainz-cache build"` |
+| `step` | per-event field | `"import"`, `"resolve"`, `"copy"` |
+| `run_id` | UUIDv4 (or override) | `"4eb6f1b7-..."` |
+
+When the `SENTRY_DSN` env var is set (or `sentry_dsn` is passed in), panics and `tracing::error!` events (Rust) / `logger.error` events (Python) are forwarded to Sentry tagged with the same fields.
+
+### Rust
+
+```rust
+use wxyc_etl::logger::{self, LoggerConfig};
+
+fn main() {
+    let _guard = logger::init(LoggerConfig {
+        repo: "musicbrainz-cache",
+        tool: "musicbrainz-cache build",
+        sentry_dsn: None,         // falls back to SENTRY_DSN env
+        run_id: None,             // generates UUIDv4
+    });
+
+    tracing::info_span!("import", step = "import").in_scope(|| {
+        tracing::info!(rows = 42, "loaded recordings");
+    });
+}
+```
+
+The guard must be held for the lifetime of `main` so Sentry flushes on drop.
+
+### Python
+
+```python
+from wxyc_etl.logger import init_logger
+import logging
+
+guard = init_logger(repo="discogs-etl", tool="discogs-etl daily-sync")
+
+log = logging.getLogger(__name__)
+log.info("loaded recordings", extra={"step": "import", "rows": 42})
+```
+
+`init_logger` is idempotent — calling it again replaces the tag values without re-installing handlers. Drop the guard or call `guard.flush()` to drain Sentry before exit (also registered via `atexit`).
 
 `lib.rs` re-exports each module unchanged: consumers do `use wxyc_etl::text::normalize_artist_name`.
 
 ## Python Bindings (`wxyc-etl-python/`)
 
-The PyO3 crate registers each submodule under the `wxyc_etl` Python package so `from wxyc_etl.text import normalize_artist_name` works. Currently exposed: `text`, `parser`, `state`, `import_utils`, `schema`, `fuzzy`. The `pg`, `pipeline`, `csv_writer`, and `sqlite` modules are not exposed — Python consumers don't need them (they have psycopg/asyncpg directly).
+Mixed Rust/Python package laid out as:
 
-Submodule registration also writes into `sys.modules` so Python's `from X.Y import Z` form resolves correctly (PyO3 doesn't do this by default).
+```
+wxyc-etl-python/
+  src/                  # Rust extension, built as wxyc_etl._native
+  python/wxyc_etl/      # pure-Python helpers
+    __init__.py         # re-exports the Rust submodules
+    logger.py           # Sentry + JSON logging (pure Python)
+```
+
+`pyproject.toml` has `python-source = "python"` and `module-name = "wxyc_etl._native"` so maturin packs both halves into a single `wxyc_etl` package. The Rust crate registers its submodules under `wxyc_etl.<name>` in `sys.modules` so consumers can use either `from wxyc_etl.text import ...` or `from wxyc_etl import text`. Pure-Python additions go in `python/wxyc_etl/*.py`.
+
+Currently exposed Rust submodules: `text`, `parser`, `state`, `import_utils`, `schema`, `fuzzy`. The `pg`, `pipeline`, `csv_writer`, and `sqlite` modules are not exposed — Python consumers don't need them (they have psycopg/asyncpg directly).
+
+Pure-Python helpers: `logger`.
 
 ### Install for downstream Python repos
 

@@ -6,6 +6,7 @@
 pub mod csv_writer;
 pub mod fuzzy;
 pub mod import;
+pub mod logger;
 pub mod parser;
 pub mod pg;
 pub mod pipeline;

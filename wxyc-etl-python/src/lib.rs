@@ -29,7 +29,7 @@ fn register_submodule(
 }
 
 #[pymodule]
-fn wxyc_etl(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_submodule(py, m, "text", text::register)?;
     register_submodule(py, m, "parser", parser::register)?;
     register_submodule(py, m, "state", state::register)?;
