@@ -3,6 +3,7 @@
 //! Provides text normalization, fuzzy matching, PostgreSQL bulk loading,
 //! pipeline orchestration, and schema contracts.
 
+pub mod cli;
 pub mod csv_writer;
 pub mod fuzzy;
 pub mod import;
