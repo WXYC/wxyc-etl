@@ -2,7 +2,7 @@
 //!
 //! Manages N `csv::Writer` instances (one per output file), each with
 //! pre-written headers. Ported from the per-repo writer patterns in
-//! `discogs-xml-converter/src/writer.rs` and `wikidata-json-filter/src/writer.rs`.
+//! `discogs-xml-converter/src/writer.rs` and `wikidata-cache/src/writer.rs`.
 
 mod writer;
 
