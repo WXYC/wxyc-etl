@@ -8,7 +8,7 @@ Cargo workspace with two members:
 
 | Crate | Path | Purpose |
 |---|---|---|
-| `wxyc-etl` | `wxyc-etl/` | Pure Rust library. Used by other Rust ETL repos (discogs-xml-converter, musicbrainz-cache, wikidata-json-filter) via `[dependencies] wxyc-etl = { path = "../wxyc-etl" }`. |
+| `wxyc-etl` | `wxyc-etl/` | Pure Rust library. Used by other Rust ETL repos (discogs-xml-converter, musicbrainz-cache, wikidata-cache) via `[dependencies] wxyc-etl = { path = "../wxyc-etl" }`. |
 | `wxyc-etl-python` | `wxyc-etl-python/` | PyO3 extension that re-exports a curated subset to Python as `wxyc_etl.text`, `wxyc_etl.fuzzy`, `wxyc_etl.parser`, `wxyc_etl.state`, `wxyc_etl.import_utils`, `wxyc_etl.schema`. Built with maturin. |
 
 The Python crate lives in the same workspace so it shares the lockfile with the Rust crate it wraps; this guarantees the bindings always match the underlying library at the byte level.
@@ -209,7 +209,7 @@ Repos that depend on wxyc-etl by Cargo path or via the Python wheel:
 
 - **discogs-xml-converter** (Rust) — `pipeline`, `text`, `csv_writer`
 - **musicbrainz-cache** (Rust) — `pipeline`, `text`, `pg`, `schema`, `state`
-- **wikidata-json-filter** (Rust) — `pipeline`, `csv_writer`
+- **wikidata-cache** (Rust) — `pipeline`, `csv_writer`
 - **discogs-etl** (Python via PyO3) — `text`, `state`, `import_utils`, `parser`, `schema`
 - **semantic-index** (Python via PyO3) — `text`, `fuzzy`, `parser`, `schema`
 
