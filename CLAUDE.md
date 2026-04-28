@@ -203,6 +203,43 @@ jobs:
 
 Intentional opt-out for a marker that is, by design, manual-only: add `# ci-sync-skip: <marker> reason: <text>` anywhere in pyproject.toml (the script greps the raw text). See `wxyc-etl-python/pyproject.toml` for a live example (the `perf` marker).
 
+## Releases
+
+Both halves of the workspace publish from the same tag — `wxyc-etl` to crates.io, `wxyc-etl-python` to PyPI. The workspace `version` in the root `Cargo.toml` is the single source of truth; both crates inherit it via `version.workspace = true` and maturin reads it via `pyproject.toml`'s `dynamic = ["version"]`.
+
+### Cutting a release
+
+```bash
+# 1. Bump the workspace version
+$EDITOR Cargo.toml          # change [workspace.package] version
+git commit -am "chore: bump workspace version to 0.X.Y"
+
+# 2. Tag and push
+git tag v0.X.Y
+git push origin main --tags
+```
+
+The `release.yml` workflow fires on tags matching `v*.*.*`. It:
+1. Verifies the tag matches `Cargo.toml`'s workspace version.
+2. `cargo publish -p wxyc-etl` to crates.io.
+3. Builds wheels for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` plus an sdist.
+4. `maturin upload --skip-existing dist/*` to PyPI.
+
+### Rehearsing a release
+
+Use the `workflow_dispatch` trigger with `dry_run: true` (the default). It runs every build step + a `cargo publish --dry-run` and skips the actual upload steps. Safe to run any time.
+
+### Required repo secrets
+
+| Secret | Source |
+|---|---|
+| `CRATES_IO_TOKEN` | https://crates.io/me — `publish-new` + `publish-update` scopes |
+| `PYPI_API_TOKEN` | https://pypi.org/manage/account/token/ — scope to the `wxyc-etl` project after the first publish |
+
+### Versioning
+
+Stay in 0.x lockstep until rec 5 (publish) and rec 7 (migrations) both ship; cut 1.0 after that. Hard cuts in 0.x are acceptable; introduce a deprecation cycle post-1.0. See `project_pipeline_hardening` memory for the agreed-upon decisions.
+
 ## Consumers
 
 Repos that depend on wxyc-etl by Cargo path or via the Python wheel:
