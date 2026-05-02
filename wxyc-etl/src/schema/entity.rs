@@ -1,10 +1,13 @@
 //! Entity store schema constants.
 //!
-//! Matches the `entity.identity` DDL specified in the WXYC wiki's
-//! `cache-databases.md` (Cross-cutting section). These constants are
-//! placeholders to be finalized when the entity-resolution pipeline lands
-//! (Phase 5 of `metadata-consolidation-2026.md`); that implementation's DDL
-//! is the source of truth.
+//! Mirrors the live `entity.identity` schema in the discogs-cache PG. The
+//! producer is library-metadata-lookup's `scripts/entity_resolution/` —
+//! that pipeline's DDL is the source of truth; these constants exist for
+//! Rust consumers that need to address the same table without hardcoding
+//! names. See the WXYC wiki's `cache-databases.md` (Cross-cutting:
+//! `entity.identity`) for the full producer/consumer story and the
+//! cross-cache-identity follow-on that plans to migrate this table to a
+//! Backend-side `wxyc_schema.library_identity`.
 
 pub const ENTITY_IDENTITY_TABLE: &str = "entity.identity";
 
