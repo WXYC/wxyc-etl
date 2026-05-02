@@ -1,8 +1,10 @@
 //! Artist and title name normalization.
 //!
 //! Normalizes names using NFKD decomposition with combining character
-//! removal, matching the behavior of `filter_csv.py:normalize_artist()` in
-//! the discogs-cache repo.
+//! removal, derived from `filter_csv.py:normalize_artist()` in the
+//! discogs-cache repo. Diverges in one place: this module also folds the
+//! Greek lowercase final-form sigma (U+03C2 ς) to the medial-form sigma
+//! (U+03C3 σ) — see `fold_sigma`. The Python implementation does not.
 
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
@@ -10,13 +12,17 @@ use unicode_normalization::UnicodeNormalization;
 /// Normalize an artist name for matching.
 ///
 /// Applies NFKD decomposition, strips combining characters (diacritics),
-/// lowercases, and trims whitespace. This matches the Python implementation:
+/// lowercases, folds the Greek final-form sigma (U+03C2 ς → U+03C3 σ),
+/// and trims whitespace. The first three steps match this Python:
 ///
 /// ```python
 /// nfkd = unicodedata.normalize("NFKD", name)
 /// stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
 /// return stripped.lower().strip()
 /// ```
+///
+/// The sigma fold is the WXYC/library-metadata-lookup#168 warm-up — see
+/// `fold_sigma`.
 pub fn normalize_artist_name(name: &str) -> String {
     let result = strip_diacritics_and_lowercase(name);
     let trimmed = result.trim_matches(' ');
@@ -30,11 +36,16 @@ pub fn normalize_artist_name(name: &str) -> String {
 /// Strip diacritics via NFKD decomposition without lowercasing or trimming.
 ///
 /// Useful for title normalization contexts where case preservation is needed.
+///
+/// Also folds the Greek lowercase final-form sigma (U+03C2 ς) to the
+/// medial-form sigma (U+03C3 σ) so positional variants of the same letter
+/// hash to the same bucket. Capital sigma (U+03A3 Σ) is preserved here —
+/// it is folded only by the lowercasing path in `normalize_artist_name`.
 pub fn strip_diacritics(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.nfkd() {
         if !c.is_mark() {
-            result.push(c);
+            result.push(fold_sigma(c));
         }
     }
     result
@@ -49,16 +60,35 @@ pub fn normalize_title(title: &str) -> String {
 }
 
 /// NFKD decompose, remove combining marks, and lowercase in a single pass.
+/// Also folds the Greek lowercase final-form sigma (U+03C2 ς) to the
+/// medial-form sigma (U+03C3 σ) — see `fold_sigma`.
 fn strip_diacritics_and_lowercase(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.nfkd() {
         if !c.is_mark() {
             for lc in c.to_lowercase() {
-                result.push(lc);
+                result.push(fold_sigma(lc));
             }
         }
     }
     result
+}
+
+/// Fold the Greek lowercase final-form sigma (U+03C2 ς) to the medial-form
+/// sigma (U+03C3 σ). These are positional variants of the same letter and
+/// must hash to the same normalized bucket; default Unicode case mapping
+/// does not collapse them.
+///
+/// This is the WX-2 "warm-up" — it patches the existing normalizer ahead of
+/// the broader normalizer-charter migration in WXYC/docs#16, where this fold
+/// will move into `to_match_form`. See WXYC/library-metadata-lookup#168.
+#[inline]
+fn fold_sigma(c: char) -> char {
+    if c == '\u{03C2}' {
+        '\u{03C3}'
+    } else {
+        c
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +207,40 @@ mod tests {
         assert_eq!(normalize_title("Hermanos Gutiérrez"), "hermanos gutierrez");
         assert_eq!(normalize_title("  Sugar Hill  "), "sugar hill");
         assert_eq!(normalize_title("Aluminum Tunes"), "aluminum tunes");
+    }
+
+    // --- Greek sigma fold (WXYC/library-metadata-lookup#168) ---
+    // Final-form sigma U+03C2 (ς) and medial-form sigma U+03C3 (σ) are
+    // positional variants of the same letter and must hash to the same
+    // normalized bucket.
+
+    #[test]
+    fn test_normalize_folds_final_sigma_to_medial() {
+        assert_eq!(normalize_artist_name("\u{03C2}"), "\u{03C3}");
+    }
+
+    #[test]
+    fn test_normalize_capital_sigma_lowercases_to_medial() {
+        assert_eq!(normalize_artist_name("\u{03A3}"), "\u{03C3}");
+    }
+
+    #[test]
+    fn test_normalize_greek_word_sigma_variants_collide() {
+        let final_form = "Στελλάς";
+        let medial_form = "Στελλάσ";
+        assert_eq!(
+            normalize_artist_name(final_form),
+            normalize_artist_name(medial_form)
+        );
+    }
+
+    #[test]
+    fn test_strip_diacritics_folds_final_sigma_to_medial() {
+        assert_eq!(strip_diacritics("\u{03C2}"), "\u{03C3}");
+    }
+
+    #[test]
+    fn test_strip_diacritics_preserves_capital_sigma() {
+        assert_eq!(strip_diacritics("\u{03A3}"), "\u{03A3}");
     }
 }
