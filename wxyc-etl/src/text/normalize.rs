@@ -20,9 +20,6 @@ use unicode_normalization::UnicodeNormalization;
 /// stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
 /// return stripped.lower().strip()
 /// ```
-///
-/// The sigma fold is the WXYC/library-metadata-lookup#168 warm-up — see
-/// `fold_sigma`.
 pub fn normalize_artist_name(name: &str) -> String {
     let result = strip_diacritics_and_lowercase(name);
     let trimmed = result.trim_matches(' ');
@@ -78,10 +75,6 @@ fn strip_diacritics_and_lowercase(s: &str) -> String {
 /// sigma (U+03C3 σ). These are positional variants of the same letter and
 /// must hash to the same normalized bucket; default Unicode case mapping
 /// does not collapse them.
-///
-/// This is the WX-2 "warm-up" — it patches the existing normalizer ahead of
-/// the broader normalizer-charter migration in WXYC/docs#16, where this fold
-/// will move into `to_match_form`. See WXYC/library-metadata-lookup#168.
 #[inline]
 fn fold_sigma(c: char) -> char {
     if c == '\u{03C2}' {
@@ -209,7 +202,7 @@ mod tests {
         assert_eq!(normalize_title("Aluminum Tunes"), "aluminum tunes");
     }
 
-    // --- Greek sigma fold (WXYC/library-metadata-lookup#168) ---
+    // --- Greek sigma fold ---
     // Final-form sigma U+03C2 (ς) and medial-form sigma U+03C3 (σ) are
     // positional variants of the same letter and must hash to the same
     // normalized bucket.
