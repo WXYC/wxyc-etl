@@ -23,10 +23,9 @@ from wxyc_etl import text
         # Multi-diacritic Turkish — canonical from @wxyc/shared#81. Note:
         # ı (dotless i) does not decompose under NFKD; only ş is stripped.
         ("Aşıq Altay", "asıq altay"),
-        # Greek sigma variants (WXYC/library-metadata-lookup#168). Final-form
-        # ς (U+03C2) and medial-form σ (U+03C3) are positional variants of
-        # the same letter; they must collapse to σ. Capital Σ (U+03A3) also
-        # lowercases to σ.
+        # Greek sigma variants. Final-form ς (U+03C2) and medial-form
+        # σ (U+03C3) are positional variants of the same letter; they must
+        # collapse to σ. Capital Σ (U+03A3) also lowercases to σ.
         ("\u03c2", "\u03c3"),
         ("\u03a3", "\u03c3"),
         # Identical normalized output regardless of which sigma form ends the
@@ -70,9 +69,9 @@ def test_normalize_artist_name_none():
         ("  Hermanos Gutiérrez  ", "  Hermanos Gutierrez  "),
         ("Stereolab", "Stereolab"),
         ("", ""),
-        # Greek sigma fold (WXYC/library-metadata-lookup#168): final-form ς
-        # collapses to medial-form σ even in the case-preserving variant.
-        # Capital Σ is preserved here because no case mapping is applied.
+        # Greek sigma fold: final-form ς collapses to medial-form σ even in
+        # the case-preserving variant. Capital Σ is preserved here because
+        # no case mapping is applied.
         ("\u03c2", "\u03c3"),
         ("\u03a3", "\u03a3"),
     ],
