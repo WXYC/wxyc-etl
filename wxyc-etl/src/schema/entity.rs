@@ -1,8 +1,10 @@
 //! Entity store schema constants.
 //!
-//! Matches the entity store DDL from the architecture document
-//! (`etl-pipeline-architecture.md`). These constants are placeholders to be
-//! finalized when task 5a is implemented; 5a's DDL is the source of truth.
+//! Matches the `entity.identity` DDL specified in the WXYC wiki's
+//! `cache-databases.md` (Cross-cutting section). These constants are
+//! placeholders to be finalized when the entity-resolution pipeline lands
+//! (Phase 5 of `metadata-consolidation-2026.md`); that implementation's DDL
+//! is the source of truth.
 
 pub const ENTITY_IDENTITY_TABLE: &str = "entity.identity";
 
