@@ -23,6 +23,16 @@ from wxyc_etl import text
         # Multi-diacritic Turkish — canonical from @wxyc/shared#81. Note:
         # ı (dotless i) does not decompose under NFKD; only ş is stripped.
         ("Aşıq Altay", "asıq altay"),
+        # Greek sigma variants (WXYC/library-metadata-lookup#168). Final-form
+        # ς (U+03C2) and medial-form σ (U+03C3) are positional variants of
+        # the same letter; they must collapse to σ. Capital Σ (U+03A3) also
+        # lowercases to σ.
+        ("\u03c2", "\u03c3"),
+        ("\u03a3", "\u03c3"),
+        # Identical normalized output regardless of which sigma form ends the
+        # word — that is the property the fold is buying us.
+        ("\u03a3\u03c4\u03b5\u03bb\u03bb\u03ac\u03c2", "\u03c3\u03c4\u03b5\u03bb\u03bb\u03b1\u03c3"),
+        ("\u03a3\u03c4\u03b5\u03bb\u03bb\u03ac\u03c3", "\u03c3\u03c4\u03b5\u03bb\u03bb\u03b1\u03c3"),
     ],
     ids=[
         "lowercase",
@@ -35,6 +45,10 @@ from wxyc_etl import text
         "hermanos_gutierrez",
         "sonido_duenez",
         "asiq_altay",
+        "final_sigma_to_medial",
+        "capital_sigma_to_medial",
+        "greek_word_final_sigma",
+        "greek_word_medial_sigma",
     ],
 )
 def test_normalize_artist_name(input_name, expected):
@@ -56,6 +70,11 @@ def test_normalize_artist_name_none():
         ("  Hermanos Gutiérrez  ", "  Hermanos Gutierrez  "),
         ("Stereolab", "Stereolab"),
         ("", ""),
+        # Greek sigma fold (WXYC/library-metadata-lookup#168): final-form ς
+        # collapses to medial-form σ even in the case-preserving variant.
+        # Capital Σ is preserved here because no case mapping is applied.
+        ("\u03c2", "\u03c3"),
+        ("\u03a3", "\u03a3"),
     ],
 )
 def test_strip_diacritics(input_str, expected):
