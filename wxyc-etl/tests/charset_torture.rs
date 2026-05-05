@@ -64,6 +64,23 @@ fn expected_failures() -> HashMap<&'static str, &'static str> {
         "Ё",
         "[etl:no-match-form] WX-2 charter must preserve Cyrillic Ё diaeresis",
     );
+    // bidi_marks: Cf format chars (LRM/RLM/RLO/PDF) survive NFKD + is_mark
+    // filter because they are category Cf, not M. The WX-2 charter strips
+    // all Cf in match-form except U+200D (ZWJ). normalize_artist_name does
+    // not yet implement that strip — it will when M2.2.5 deprecates the
+    // legacy normalizer in favor of to_match_form.
+    m.insert(
+        "Hello\u{200E}World",
+        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
+    );
+    m.insert(
+        "Hello\u{200F}World",
+        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
+    );
+    m.insert(
+        "\u{202E}Reversed\u{202C}",
+        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
+    );
     m
 }
 
