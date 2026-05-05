@@ -2,11 +2,11 @@
 //!
 //! Drives every entry of the WX-1 charset-torture corpus through
 //! `wxyc_etl::text::to_storage_form` and asserts the result equals the
-//! corpus's `expected_storage`. The 6 `mojibake_known` fix-pairs are the
-//! load-bearing assertions; the other categories assert that storage form
-//! is a no-op for non-mojibake input (in particular: NFC vs NFD bytes are
-//! preserved as-is — fidelity is the storage contract; canonicalization
-//! happens in `to_match_form` via NFKC).
+//! corpus's `expected_storage`. Three classes of assertion:
+//!
+//! - `mojibake_known` (6 entries): the fix-pair is reversed.
+//! - `normalization` NFD entries (2 entries): bytes canonicalize to NFC.
+//! - everything else (~30 entries): storage form is a passthrough.
 //!
 //! Companion to `tests/charset_torture.rs` (which exercises the legacy
 //! `normalize_artist_name` path).

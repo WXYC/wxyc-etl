@@ -67,27 +67,29 @@ const fn char_to_w1252_byte(c: char) -> Option<u8> {
 /// first byte of a mojibake'd UTF-8 sequence? Skipping the full conversion
 /// for clean input keeps storage-form a near-no-op on the hot path.
 ///
-/// The trigger set is the union of (a) Latin-1 capitals 0xC2..0xDB whose
-/// bytes start a 2-byte UTF-8 sequence (Â/Ã = 2-byte Latin scripts;
-/// Î/Ï/Ð/Ñ = Greek/Cyrillic; Ø/Ù/Ú/Û = Hebrew/Arabic) and (b) `â` (0xE2)
-/// which starts the 3-byte UTF-8 sequence for U+2000-block punctuation.
+/// Each trigger codepoint corresponds to a UTF-8 lead byte that, when
+/// re-decoded as Latin-1/Windows-1252, produces a chunk of the U+xxxx range
+/// indicated. Hebrew (lead bytes 0xD6, 0xD7 → Ö, ×) is intentionally
+/// absent — no Hebrew mojibake fix-pair exists in the WX-1 corpus today,
+/// and the false-positive cost on common Swedish/Finnish/German Ö is
+/// non-zero. Add when a real case surfaces.
 fn has_mojibake_trigger(s: &str) -> bool {
     s.chars().any(|c| {
         matches!(
             c,
-            '\u{00C2}'  // Â — 2-byte UTF-8 start, Latin-1 punctuation
-            | '\u{00C3}'  // Ã — 2-byte UTF-8 start, Latin diacritics
-            | '\u{00C4}'  // Ä — 2-byte UTF-8 start, Latin Extended-A
-            | '\u{00C5}'  // Å — 2-byte UTF-8 start, Latin Extended-A
-            | '\u{00CE}'  // Î — 2-byte UTF-8 start, Greek
-            | '\u{00CF}'  // Ï — 2-byte UTF-8 start, Greek
-            | '\u{00D0}'  // Ð — 2-byte UTF-8 start, Cyrillic
-            | '\u{00D1}'  // Ñ — 2-byte UTF-8 start, Cyrillic
-            | '\u{00D8}'  // Ø — 2-byte UTF-8 start, Hebrew
-            | '\u{00D9}'  // Ù — 2-byte UTF-8 start, Arabic
-            | '\u{00DA}'  // Ú — 2-byte UTF-8 start, Arabic
-            | '\u{00DB}'  // Û — 2-byte UTF-8 start
-            | '\u{00E2}' // â — 3-byte UTF-8 start, U+2000-block punctuation
+            '\u{00C2}'  // Â — lead byte 0xC2 → U+0080..U+00BF (Latin-1 punctuation, etc.)
+            | '\u{00C3}'  // Ã — lead byte 0xC3 → U+00C0..U+00FF (Latin-1 diacritics)
+            | '\u{00C4}'  // Ä — lead byte 0xC4 → U+0100..U+013F (Latin Extended-A)
+            | '\u{00C5}'  // Å — lead byte 0xC5 → U+0140..U+017F (Latin Extended-A)
+            | '\u{00CE}'  // Î — lead byte 0xCE → U+0380..U+03BF (Greek)
+            | '\u{00CF}'  // Ï — lead byte 0xCF → U+03C0..U+03FF (Greek)
+            | '\u{00D0}'  // Ð — lead byte 0xD0 → U+0400..U+043F (Cyrillic)
+            | '\u{00D1}'  // Ñ — lead byte 0xD1 → U+0440..U+047F (Cyrillic)
+            | '\u{00D8}'  // Ø — lead byte 0xD8 → U+0600..U+063F (Arabic)
+            | '\u{00D9}'  // Ù — lead byte 0xD9 → U+0640..U+067F (Arabic)
+            | '\u{00DA}'  // Ú — lead byte 0xDA → U+0680..U+06BF (Arabic Supplement)
+            | '\u{00DB}'  // Û — lead byte 0xDB → U+06C0..U+06FF (Arabic Supplement / NKo)
+            | '\u{00E2}' // â — lead byte 0xE2 → 3-byte sequences in U+2000–U+2FFF (punctuation)
         )
     })
 }
