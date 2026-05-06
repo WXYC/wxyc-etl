@@ -3,6 +3,11 @@
 import pytest
 from wxyc_etl import text
 
+# Exercises the legacy normalize_artist_name / strip_diacritics / batch_normalize
+# bindings on purpose; their DeprecationWarning signal is verified by
+# test_deprecations.py.
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
 
 # --- normalize_artist_name ---
 

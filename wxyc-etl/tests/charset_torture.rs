@@ -13,6 +13,11 @@
 //!    landed without updating the map; remove the entry.
 //!
 //! See WXYC/docs#15 for the WX-1 plan.
+//!
+//! Exercises the legacy `normalize_artist_name` on purpose; the deprecation
+//! warning is silenced for the file. The legacy detector retires when M3
+//! per-repo migration replaces it with the WX-2 charter forms (docs#16).
+#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

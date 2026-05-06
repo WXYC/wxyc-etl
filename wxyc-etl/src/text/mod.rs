@@ -19,12 +19,17 @@ pub mod normalize;
 pub mod split;
 
 // Convenience re-exports for the most common entry points.
-pub use batch::{
-    batch_filter, batch_normalize, batch_to_ascii_form, batch_to_match_form, batch_to_storage_form,
-};
+pub use batch::{batch_filter, batch_to_ascii_form, batch_to_match_form, batch_to_storage_form};
 pub use compilation::{is_compilation_artist, COMPILATION_KEYWORDS};
 pub use filter::{ArtistFilter, TitleFilter};
 pub use forms::{to_ascii_form, to_match_form, to_storage_form};
 pub use mojibake::fix_mojibake;
-pub use normalize::{normalize_artist_name, normalize_title, strip_diacritics};
 pub use split::{split_artist_name, split_artist_name_contextual};
+
+// Deprecated re-exports — kept for back-compat until M3 per-repo migration retires
+// each consumer (docs#16). Re-exported through an `#[allow(deprecated)]` shim so the
+// module itself doesn't fire the warning on every build.
+#[allow(deprecated)]
+pub use batch::batch_normalize;
+#[allow(deprecated)]
+pub use normalize::{normalize_artist_name, normalize_title, strip_diacritics};

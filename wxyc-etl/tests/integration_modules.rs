@@ -3,6 +3,10 @@
 //! These tests wire two or more modules together to verify cross-module
 //! contracts. Each module has its own unit tests; these integration tests
 //! exercise the boundaries between modules using realistic WXYC data.
+//!
+//! Exercises the legacy normalizer functions on purpose; the per-call
+//! deprecation warnings are silenced for the file.
+#![allow(deprecated)]
 
 use std::collections::HashSet;
 

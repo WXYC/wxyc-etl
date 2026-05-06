@@ -13,6 +13,10 @@ from wxyc_etl import text
 # Performance tests require release build; mark so they can be skipped in CI debug
 perf = pytest.mark.perf
 
+# Exercises the legacy batch_normalize binding on purpose; its DeprecationWarning
+# signal is verified by test_deprecations.py.
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
 
 @perf
 def test_batch_normalize_performance():

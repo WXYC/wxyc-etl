@@ -13,6 +13,10 @@
 //! in the REVIEW band, the other two scorers can't change the answer), this
 //! turns Phase 4 of `verify_cache.py` from hours into minutes on a
 //! large library.
+//!
+//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
+//! migration to the WX-2 charter forms (docs#16).
+#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 

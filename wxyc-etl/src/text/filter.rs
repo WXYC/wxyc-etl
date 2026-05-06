@@ -1,4 +1,8 @@
 //! HashSet-based artist and title filtering.
+//!
+//! Internal callers of the legacy `normalize_artist_name` / `normalize_title`
+//! pending M3 per-repo migration to the WX-2 charter forms (docs#16).
+#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
