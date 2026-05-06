@@ -9,6 +9,7 @@ description = "Shared ETL crate for the WXYC music data pipeline"
 # text module
 unicode-normalization = "0.1"
 unicode_categories = "0.1"
+deunicode = "1"
 
 # pg module
 postgres = "0.19"

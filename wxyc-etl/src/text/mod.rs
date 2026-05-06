@@ -22,7 +22,7 @@ pub mod split;
 pub use batch::{batch_filter, batch_normalize};
 pub use compilation::{is_compilation_artist, COMPILATION_KEYWORDS};
 pub use filter::{ArtistFilter, TitleFilter};
-pub use forms::{to_match_form, to_storage_form};
+pub use forms::{to_ascii_form, to_match_form, to_storage_form};
 pub use mojibake::fix_mojibake;
 pub use normalize::{normalize_artist_name, normalize_title, strip_diacritics};
 pub use split::{split_artist_name, split_artist_name_contextual};
