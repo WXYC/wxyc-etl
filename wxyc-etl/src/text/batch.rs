@@ -4,11 +4,27 @@
 //! avoiding per-item Python/Rust boundary crossings.
 
 use super::filter::ArtistFilter;
+use super::forms::{to_ascii_form, to_match_form, to_storage_form};
 use super::normalize::normalize_artist_name;
 
 /// Normalize a batch of artist names in one call.
 pub fn batch_normalize(names: &[String]) -> Vec<String> {
     names.iter().map(|n| normalize_artist_name(n)).collect()
+}
+
+/// Apply [`to_storage_form`] to each input in one call.
+pub fn batch_to_storage_form(inputs: &[String]) -> Vec<String> {
+    inputs.iter().map(|s| to_storage_form(s)).collect()
+}
+
+/// Apply [`to_match_form`] to each input in one call.
+pub fn batch_to_match_form(inputs: &[String]) -> Vec<String> {
+    inputs.iter().map(|s| to_match_form(s)).collect()
+}
+
+/// Apply [`to_ascii_form`] to each input in one call.
+pub fn batch_to_ascii_form(inputs: &[String]) -> Vec<String> {
+    inputs.iter().map(|s| to_ascii_form(s)).collect()
 }
 
 /// Normalize and check membership for a batch of names.
@@ -63,6 +79,35 @@ mod tests {
             batch_filter(&names, &filter),
             vec![true, false, true, false]
         );
+    }
+
+    #[test]
+    fn test_batch_to_storage_form_matches_singles() {
+        let inputs: Vec<String> = vec!["Stereolab".into(), "  Caf\u{00e9}  ".into()];
+        let expected: Vec<String> = inputs.iter().map(|s| to_storage_form(s)).collect();
+        assert_eq!(batch_to_storage_form(&inputs), expected);
+    }
+
+    #[test]
+    fn test_batch_to_match_form_matches_singles() {
+        let inputs: Vec<String> = vec!["STEREOLAB".into(), "Nil\u{00fc}fer Yanya".into()];
+        let expected: Vec<String> = inputs.iter().map(|s| to_match_form(s)).collect();
+        assert_eq!(batch_to_match_form(&inputs), expected);
+    }
+
+    #[test]
+    fn test_batch_to_ascii_form_matches_singles() {
+        let inputs: Vec<String> = vec!["\u{03a3}tella".into(), "Stereolab \u{1f3b8}".into()];
+        let expected: Vec<String> = inputs.iter().map(|s| to_ascii_form(s)).collect();
+        assert_eq!(batch_to_ascii_form(&inputs), expected);
+    }
+
+    #[test]
+    fn test_batch_form_helpers_empty() {
+        let names: Vec<String> = vec![];
+        assert!(batch_to_storage_form(&names).is_empty());
+        assert!(batch_to_match_form(&names).is_empty());
+        assert!(batch_to_ascii_form(&names).is_empty());
     }
 
     #[test]
