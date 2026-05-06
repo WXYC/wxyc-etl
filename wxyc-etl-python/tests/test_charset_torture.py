@@ -17,6 +17,10 @@ from pathlib import Path
 import pytest
 import wxyc_etl
 
+# Exercises the legacy normalize_artist_name binding on purpose; its
+# DeprecationWarning signal is verified by test_deprecations.py.
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
 _CORPUS_PATH = (
     Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "charset-torture.json"
 )

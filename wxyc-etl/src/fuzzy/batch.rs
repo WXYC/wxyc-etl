@@ -2,6 +2,10 @@
 //!
 //! Array-in/array-out APIs suitable for PyO3 exposure, avoiding per-item
 //! Python/Rust boundary crossings.
+//!
+//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
+//! migration to the WX-2 charter forms (docs#16).
+#![allow(deprecated)]
 
 use std::collections::HashSet;
 

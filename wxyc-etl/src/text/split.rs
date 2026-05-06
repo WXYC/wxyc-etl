@@ -2,6 +2,10 @@
 //!
 //! Ports `discogs-cache/lib/artist_splitting.py` to Rust.
 //! Splits combined multi-artist library entries into individual components.
+//!
+//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
+//! migration to the WX-2 charter forms (docs#16).
+#![allow(deprecated)]
 
 use std::collections::HashSet;
 

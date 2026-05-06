@@ -20,6 +20,10 @@ use unicode_normalization::UnicodeNormalization;
 /// stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
 /// return stripped.lower().strip()
 /// ```
+#[deprecated(
+    since = "0.2.0",
+    note = "use wxyc_etl::text::to_match_form (or to_storage_form / to_ascii_form) — see plans/mojibake-prevention/2-normalizer-charter.md"
+)]
 pub fn normalize_artist_name(name: &str) -> String {
     let result = strip_diacritics_and_lowercase(name);
     let trimmed = result.trim_matches(' ');
@@ -38,6 +42,10 @@ pub fn normalize_artist_name(name: &str) -> String {
 /// medial-form sigma (U+03C3 σ) so positional variants of the same letter
 /// hash to the same bucket. Capital sigma (U+03A3 Σ) is preserved here —
 /// it is folded only by the lowercasing path in `normalize_artist_name`.
+#[deprecated(
+    since = "0.2.0",
+    note = "use wxyc_etl::text::to_match_form (or to_storage_form / to_ascii_form) — see plans/mojibake-prevention/2-normalizer-charter.md"
+)]
 pub fn strip_diacritics(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.nfkd() {
@@ -52,7 +60,12 @@ pub fn strip_diacritics(s: &str) -> String {
 ///
 /// Uses the same NFKD + combining-character-removal + lowercase + trim as
 /// `normalize_artist_name`.
+#[deprecated(
+    since = "0.2.0",
+    note = "use wxyc_etl::text::to_match_form — see plans/mojibake-prevention/2-normalizer-charter.md"
+)]
 pub fn normalize_title(title: &str) -> String {
+    #[allow(deprecated)]
     normalize_artist_name(title)
 }
 
@@ -85,6 +98,7 @@ fn fold_sigma(c: char) -> char {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
