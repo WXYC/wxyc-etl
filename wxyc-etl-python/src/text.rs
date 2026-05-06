@@ -9,6 +9,12 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_compilation_artist, m)?)?;
     m.add_function(wrap_pyfunction!(split_artist_name, m)?)?;
     m.add_function(wrap_pyfunction!(split_artist_name_contextual, m)?)?;
+    m.add_function(wrap_pyfunction!(to_storage_form, m)?)?;
+    m.add_function(wrap_pyfunction!(to_match_form, m)?)?;
+    m.add_function(wrap_pyfunction!(to_ascii_form, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_to_storage_form, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_to_match_form, m)?)?;
+    m.add_function(wrap_pyfunction!(batch_to_ascii_form, m)?)?;
     Ok(())
 }
 
@@ -56,4 +62,40 @@ fn split_artist_name(name: &str) -> Option<Vec<String>> {
 #[pyfunction]
 fn split_artist_name_contextual(name: &str, known_artists: HashSet<String>) -> Option<Vec<String>> {
     wxyc_etl::text::split_artist_name_contextual(name, &known_artists)
+}
+
+/// WX-2 storage form: mojibake fix + NFC + trim.
+#[pyfunction]
+fn to_storage_form(s: &str) -> String {
+    wxyc_etl::text::to_storage_form(s)
+}
+
+/// WX-2 match form: NFKC + lowercase + selective combining-strip + folds + Cf-strip.
+#[pyfunction]
+fn to_match_form(s: &str) -> String {
+    wxyc_etl::text::to_match_form(s)
+}
+
+/// WX-2 ASCII form: match form + emoji-strip + Ё override + deunicode + ASCII-only.
+#[pyfunction]
+fn to_ascii_form(s: &str) -> String {
+    wxyc_etl::text::to_ascii_form(s)
+}
+
+/// Apply [`to_storage_form`] to each input in one cross-FFI call.
+#[pyfunction]
+fn batch_to_storage_form(inputs: Vec<String>) -> Vec<String> {
+    wxyc_etl::text::batch_to_storage_form(&inputs)
+}
+
+/// Apply [`to_match_form`] to each input in one cross-FFI call.
+#[pyfunction]
+fn batch_to_match_form(inputs: Vec<String>) -> Vec<String> {
+    wxyc_etl::text::batch_to_match_form(&inputs)
+}
+
+/// Apply [`to_ascii_form`] to each input in one cross-FFI call.
+#[pyfunction]
+fn batch_to_ascii_form(inputs: Vec<String>) -> Vec<String> {
+    wxyc_etl::text::batch_to_ascii_form(&inputs)
 }
