@@ -6,13 +6,15 @@
 //!
 //! Currently implemented:
 //! - [`to_storage_form`] (WX-2.2.1)
+//! - [`to_match_form`] (WX-2.2.2)
 //!
 //! Planned:
-//! - `to_match_form` (WX-2.2.2)
 //! - `to_ascii_form` (WX-2.2.3)
 
+use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
 
+use super::folds::apply_folds;
 use super::mojibake::fix_mojibake;
 
 /// Canonical bytes to *store*. Caller should write the return value to
@@ -38,6 +40,117 @@ pub fn to_storage_form(s: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Equivalence-class form for *comparison*. Caller normalizes both sides
+/// of a comparison through this; the return value is **never stored**.
+///
+/// Pipeline:
+/// 1. [`to_storage_form`] — equivalence is computed against canonical bytes.
+/// 2. NFKC compatibility composition (folds half-width / full-width,
+///    micro-sign U+00B5 → Greek µ, ligatures with compat decomposition).
+/// 3. Default Unicode lowercasing (`char::to_lowercase`). Covers Σ → σ,
+///    Ё → ё, É → é, etc. Eszett ß is preserved (lowercase identity);
+///    if a future need arises, swap in the `caseless` crate for
+///    Default Caseless TR#31 case-folding.
+/// 4. Strip combining marks **selectively**: NFD-decompose, drop combining
+///    marks only when the preceding base codepoint is in Latin or Greek
+///    script, then re-NFC. Cyrillic Ё/Й-style script-essential
+///    diaeresis / breve survive; Latin é / ñ and Greek ά become e / n / α.
+/// 5. Apply WXYC fold registry (see [`super::folds`]): final-sigma ς → σ,
+///    æ → ae, œ → oe.
+/// 6. Strip Cf format characters **except** U+200D ZWJ (preserved so emoji
+///    sequences like 👨‍👩‍👧‍👦 stay intact). LRM/RLM/RLO/PDF and
+///    isolate marks all go.
+/// 7. Collapse runs of ASCII space (U+0020) to a single space; trim leading
+///    and trailing ASCII space. Other whitespace (TAB, etc.) is preserved
+///    for round-trip fidelity to the original input.
+///
+/// Cross-script transliteration (Σ → S, я → ya) is **not** performed here;
+/// that is `to_ascii_form`'s job.
+///
+/// Idempotent: `to_match_form(to_match_form(s)) == to_match_form(s)`.
+pub fn to_match_form(s: &str) -> String {
+    let storage = to_storage_form(s);
+    let nfkc: String = storage.nfkc().collect();
+    let lower: String = nfkc.chars().flat_map(char::to_lowercase).collect();
+    let stripped = strip_combining_selective(&lower);
+    let folded = apply_folds(&stripped);
+    let cf_stripped = strip_cf_except_zwj(&folded);
+    collapse_and_trim_ascii_space(&cf_stripped)
+}
+
+/// NFD-decompose, drop combining marks whose base is Latin or Greek, then
+/// re-NFC. Bases in scripts where a diacritic carries lexical weight
+/// (Cyrillic Ё/Й, etc.) keep their marks.
+fn strip_combining_selective(s: &str) -> String {
+    let mut buf = String::with_capacity(s.len());
+    let mut prev_base: Option<char> = None;
+    for c in s.nfd() {
+        if c.is_mark() {
+            if matches!(prev_base, Some(b) if is_diacritic_decoration_script(b)) {
+                continue;
+            }
+            buf.push(c);
+        } else {
+            buf.push(c);
+            prev_base = Some(c);
+        }
+    }
+    buf.nfc().collect()
+}
+
+/// Scripts where a combining diacritic on a base letter is decoration, not
+/// a distinct letter — safe to strip during match-form folding. Latin
+/// (incl. all Latin Extended blocks) and Greek (incl. Greek Extended).
+///
+/// Cyrillic, Hebrew, Arabic, CJK, and supplementary-plane scripts are
+/// excluded: their combining marks (Cyrillic diaeresis on Е → Ё; Hebrew
+/// niqqud; Arabic tashkil) carry phonemic weight.
+fn is_diacritic_decoration_script(c: char) -> bool {
+    let cp = c as u32;
+    cp <= 0x024F                          // Basic Latin..Latin Extended-B
+        || (0x1E00..=0x1EFF).contains(&cp) // Latin Extended Additional
+        || (0x2C60..=0x2C7F).contains(&cp) // Latin Extended-C
+        || (0xA720..=0xA7FF).contains(&cp) // Latin Extended-D
+        || (0xAB30..=0xAB6F).contains(&cp) // Latin Extended-E
+        || (0x0370..=0x03FF).contains(&cp) // Greek and Coptic
+        || (0x1F00..=0x1FFF).contains(&cp) // Greek Extended
+}
+
+/// Drop Unicode Cf (format) characters, except U+200D ZWJ which carries
+/// emoji-sequence semantics.
+fn strip_cf_except_zwj(s: &str) -> String {
+    if !s.chars().any(|c| c != '\u{200D}' && c.is_other_format()) {
+        return s.to_string();
+    }
+    s.chars()
+        .filter(|&c| c == '\u{200D}' || !c.is_other_format())
+        .collect()
+}
+
+/// Collapse runs of ASCII space (U+0020) to a single space; trim leading
+/// and trailing ASCII space. Other whitespace (TAB U+0009, etc.) is left
+/// alone — `tab\there` remains `tab\there` because TSV column-boundary
+/// hazards are intentional probes, not noise to scrub.
+fn collapse_and_trim_ascii_space(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = true;
+    for c in s.chars() {
+        if c == ' ' {
+            if !prev_space {
+                out.push(' ');
+                prev_space = true;
+            }
+        } else {
+            out.push(c);
+            prev_space = false;
+        }
+    }
+    if out.ends_with(' ') {
+        out.pop();
+    }
+    out
 }
 
 #[cfg(test)]
@@ -94,5 +207,109 @@ mod tests {
         let nfd = "n\u{0303}";
         let nfc = "\u{00F1}";
         assert_eq!(to_storage_form(nfd), nfc);
+    }
+
+    // --- to_match_form ---
+
+    #[test]
+    fn match_form_lowercases_and_strips_latin_diacritics() {
+        assert_eq!(to_match_form("Hermanos Gutiérrez"), "hermanos gutierrez");
+        assert_eq!(to_match_form("NILÜFER YANYA"), "nilufer yanya");
+    }
+
+    #[test]
+    fn match_form_folds_greek_capital_sigma_to_medial() {
+        assert_eq!(to_match_form("\u{03A3}tella"), "\u{03C3}tella");
+    }
+
+    #[test]
+    fn match_form_folds_greek_final_sigma_to_medial() {
+        // ς and σ must collide on the same bucket (LML#168).
+        assert_eq!(to_match_form("Στελλάς"), to_match_form("Στελλάσ"));
+        assert_eq!(to_match_form("Στελλάς"), "στελλασ");
+    }
+
+    #[test]
+    fn match_form_preserves_cyrillic_yo_diaeresis() {
+        // Cyrillic Ё must NOT decompose+strip to "е" — script-essential mark.
+        assert_eq!(to_match_form("\u{0401}"), "\u{0451}");
+    }
+
+    #[test]
+    fn match_form_strips_bidi_format_chars() {
+        assert_eq!(to_match_form("Hello\u{200E}World"), "helloworld");
+        assert_eq!(to_match_form("Hello\u{200F}World"), "helloworld");
+        assert_eq!(to_match_form("\u{202E}Reversed\u{202C}"), "reversed");
+    }
+
+    #[test]
+    fn match_form_preserves_zwj_in_emoji_sequence() {
+        // U+200D ZWJ is the only Cf char that survives — emoji integrity.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        assert_eq!(to_match_form(family), family);
+    }
+
+    #[test]
+    fn match_form_repairs_mojibake_then_folds() {
+        // to_storage_form runs first, so mojibake is fixed before folding.
+        assert_eq!(to_match_form("Î£tella"), "\u{03C3}tella");
+        assert_eq!(to_match_form("Ã©"), "e");
+        assert_eq!(to_match_form("â€™"), "\u{2019}");
+    }
+
+    #[test]
+    fn match_form_preserves_polish_l_and_norwegian_o() {
+        // Non-folds: ł and ø stay (they are letters, not decorated bases).
+        assert_eq!(to_match_form("\u{0141}ukasz"), "\u{0142}ukasz");
+        assert_eq!(to_match_form("\u{00D8}ster"), "\u{00F8}ster");
+    }
+
+    #[test]
+    fn match_form_preserves_turkish_dotless_i() {
+        assert_eq!(to_match_form("Aşıq Altay"), "asıq altay");
+    }
+
+    #[test]
+    fn match_form_preserves_cjk_emoji_arabic() {
+        assert_eq!(to_match_form("細野晴臣"), "細野晴臣");
+        assert_eq!(to_match_form("🎵"), "🎵");
+        assert_eq!(to_match_form("فيروز"), "فيروز");
+    }
+
+    #[test]
+    fn match_form_collapses_runs_of_ascii_space() {
+        assert_eq!(to_match_form("  Molchat   Doma  "), "molchat doma");
+    }
+
+    #[test]
+    fn match_form_preserves_embedded_tab() {
+        // TAB is intentional probe data, not whitespace to scrub.
+        assert_eq!(to_match_form("tab\there"), "tab\there");
+    }
+
+    #[test]
+    fn match_form_idempotent() {
+        for s in [
+            "Stereolab",
+            "Hermanos Gutiérrez",
+            "Στελλάς",
+            "細野晴臣",
+            "🎵",
+            "Î£tella",
+            "Hello\u{200E}World",
+            "\u{0401}", // Cyrillic Ё
+            "\u{1F468}\u{200D}\u{1F469}",
+        ] {
+            assert_eq!(
+                to_match_form(&to_match_form(s)),
+                to_match_form(s),
+                "idempotence broken for {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn match_form_empty() {
+        assert_eq!(to_match_form(""), "");
     }
 }
