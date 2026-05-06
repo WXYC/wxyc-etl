@@ -90,21 +90,30 @@ fn split_artist_name_contextual(name: &str, known_artists: HashSet<String>) -> O
 }
 
 /// WX-2 storage form: mojibake fix + NFC + trim.
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL values
+/// from DB columns or optional API fields.
 #[pyfunction]
-fn to_storage_form(s: &str) -> String {
-    wxyc_etl::text::to_storage_form(s)
+fn to_storage_form(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_storage_form).unwrap_or_default()
 }
 
 /// WX-2 match form: NFKC + lowercase + selective combining-strip + folds + Cf-strip.
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL values
+/// from DB columns or optional API fields.
 #[pyfunction]
-fn to_match_form(s: &str) -> String {
-    wxyc_etl::text::to_match_form(s)
+fn to_match_form(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_match_form).unwrap_or_default()
 }
 
 /// WX-2 ASCII form: match form + emoji-strip + Ё override + deunicode + ASCII-only.
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL values
+/// from DB columns or optional API fields.
 #[pyfunction]
-fn to_ascii_form(s: &str) -> String {
-    wxyc_etl::text::to_ascii_form(s)
+fn to_ascii_form(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_ascii_form).unwrap_or_default()
 }
 
 /// Apply [`to_storage_form`] to each input in one cross-FFI call.
