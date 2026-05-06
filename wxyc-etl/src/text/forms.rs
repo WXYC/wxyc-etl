@@ -7,10 +7,9 @@
 //! Currently implemented:
 //! - [`to_storage_form`] (WX-2.2.1)
 //! - [`to_match_form`] (WX-2.2.2)
-//!
-//! Planned:
-//! - `to_ascii_form` (WX-2.2.3)
+//! - [`to_ascii_form`] (WX-2.2.3)
 
+use deunicode::deunicode;
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
 
@@ -78,6 +77,43 @@ pub fn to_match_form(s: &str) -> String {
     let folded = apply_folds(&stripped);
     let cf_stripped = strip_cf_except_zwj(&folded);
     collapse_and_trim_ascii_space(&cf_stripped)
+}
+
+/// Last-resort ASCII reduction. Use only when [`to_match_form`] produced no
+/// candidates and the caller wants a maximally lenient cross-script search.
+///
+/// Pipeline:
+/// 1. [`to_match_form`] (gives canonical, NFKC, lowercase, fold-applied input).
+/// 2. Strip Symbol-Other codepoints (`So`) — emoji, music symbols, dingbats —
+///    *before* transliteration so 🎸 disappears instead of becoming "guitar".
+/// 3. WXYC Cyrillic Ё/ё override: deunicode renders these as "Io"/"io" but the
+///    common English transliteration is "Yo"/"yo" (Yot, jot). Pre-substitute.
+/// 4. [`deunicode::deunicode`]: Latin transliteration via a ~100 KB compiled-in
+///    table (Greek Σ → S, Cyrillic я → ya, ц → ts, CJK 繭 → Mao).
+/// 5. Lowercase the deunicode output (transliteration restores case).
+/// 6. Strip non-ASCII residue (anything deunicode could not transliterate).
+/// 7. Collapse runs of ASCII space; trim. TAB and other ASCII control bytes
+///    are preserved (same rule as [`to_match_form`]).
+///
+/// **Lossy in both directions.** `to_ascii_form("繭")` (kanji "cocoon") and
+/// `to_ascii_form("Mao")` (the romanization of a person's name) collide on
+/// `"mao"`. Search relevance must rank `to_match_form` matches above
+/// `to_ascii_form` matches.
+pub fn to_ascii_form(s: &str) -> String {
+    let matched = to_match_form(s);
+    let pre: String = matched
+        .chars()
+        .filter(|c| !c.is_symbol_other())
+        .flat_map(|c| match c {
+            '\u{0401}' => "Yo".chars().collect::<Vec<_>>(),
+            '\u{0451}' => "yo".chars().collect::<Vec<_>>(),
+            other => vec![other],
+        })
+        .collect();
+    let translit = deunicode(&pre);
+    let lowered: String = translit.chars().flat_map(char::to_lowercase).collect();
+    let ascii: String = lowered.chars().filter(|c| c.is_ascii()).collect();
+    collapse_and_trim_ascii_space(&ascii)
 }
 
 /// NFD-decompose, drop combining marks whose base is Latin or Greek, then
@@ -311,5 +347,78 @@ mod tests {
     #[test]
     fn match_form_empty() {
         assert_eq!(to_match_form(""), "");
+    }
+
+    // --- to_ascii_form ---
+
+    #[test]
+    fn ascii_form_lml_168_sigma_to_s() {
+        // The motivating case: "Στella" reduces to "stella" so a typed
+        // "Stella" can find the canonical entry through the ASCII fallback.
+        assert_eq!(to_ascii_form("\u{03A3}tella"), "stella");
+        assert_eq!(to_ascii_form("Στελλάς"), "stellas");
+    }
+
+    #[test]
+    fn ascii_form_cyrillic_yo_overrides_deunicode_io() {
+        // deunicode renders Ё/ё as "Io"/"io"; WXYC convention is "Yo"/"yo".
+        assert_eq!(to_ascii_form("\u{0401}"), "yo");
+        assert_eq!(to_ascii_form("\u{0451}"), "yo");
+    }
+
+    #[test]
+    fn ascii_form_strips_emoji_instead_of_describing_them() {
+        // deunicode would render 🎸 as "guitar"; we strip Symbol-Other first.
+        assert_eq!(to_ascii_form("Stereolab \u{1F3B8}"), "stereolab");
+        assert_eq!(to_ascii_form("\u{1F3B5}"), "");
+    }
+
+    #[test]
+    fn ascii_form_transliterates_cyrillic() {
+        assert_eq!(to_ascii_form("Молчат Дома"), "molchat doma");
+        assert_eq!(to_ascii_form("Аукцыон"), "auktsyon");
+    }
+
+    #[test]
+    fn ascii_form_strips_latin_diacritics_via_match_form() {
+        assert_eq!(to_ascii_form("Hermanos Gutiérrez"), "hermanos gutierrez");
+        assert_eq!(to_ascii_form("Sigur Rós"), "sigur ros");
+    }
+
+    #[test]
+    fn ascii_form_repairs_mojibake_then_transliterates() {
+        // Mojibake is fixed by the to_storage_form leg of to_match_form.
+        assert_eq!(to_ascii_form("Î£tella"), "stella");
+        assert_eq!(to_ascii_form("Ã©"), "e");
+    }
+
+    #[test]
+    fn ascii_form_preserves_embedded_tab() {
+        // Same rule as to_match_form: TAB is intentional probe data.
+        assert_eq!(to_ascii_form("tab\there"), "tab\there");
+    }
+
+    #[test]
+    fn ascii_form_idempotent() {
+        for s in [
+            "Stereolab",
+            "Hermanos Gutiérrez",
+            "Στελλάς",
+            "Молчат Дома",
+            "Î£tella",
+            "Stereolab \u{1F3B8}",
+            "\u{0401}",
+        ] {
+            assert_eq!(
+                to_ascii_form(&to_ascii_form(s)),
+                to_ascii_form(s),
+                "idempotence broken for {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ascii_form_empty() {
+        assert_eq!(to_ascii_form(""), "");
     }
 }
