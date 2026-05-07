@@ -1,8 +1,11 @@
 """PyO3 parity for the cross-cache-identity layered normalizer.
 
-Locks the Python binding against the Rust implementation's behavior. Cases
-mirror `wxyc-etl/src/text/identity.rs`'s unit tests; the full parity matrix
-ships in a follow-up PR (epic #99).
+Locks the Python binding against the Rust implementation's behavior. The
+authoritative parity matrix lives at
+`wxyc-etl/tests/fixtures/identity_normalization_cases.csv` and is exercised
+by the Rust integration test `tests/identity_normalization_parity.rs`. The
+cases below are a Python-side smoke test that the FFI binding produces the
+same results as the Rust unit tests.
 
 Spec: `docs/normalization.md`.
 """
@@ -56,3 +59,55 @@ def test_identity_match_form_sigma_collision() -> None:
     final_form = "Στελλάς"
     medial_form = "Στελλάσ"
     assert text.to_identity_match_form(final_form) == text.to_identity_match_form(medial_form)
+
+
+# --- title variant: same as base today ---
+
+
+@pytest.mark.parametrize(
+    "input_str",
+    ["Stereolab", "The Sun Also Rises", "Foo (Live)", "Bar, The", ""],
+)
+def test_title_variant_matches_base(input_str: str) -> None:
+    assert text.to_identity_match_form_title(input_str) == text.to_identity_match_form(input_str)
+
+
+# --- step 6: punctuation collapse ---
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        ("M.I.A.", "m i a"),
+        ("R.E.M.", "r e m"),
+        ("Godspeed You! Black Emperor", "godspeed you black emperor"),
+        ("!!!", ""),
+        ("+/-", ""),
+        ("10,000 Maniacs", "10 000 maniacs"),
+        ("Foo!Bar (Live)", "foo bar"),
+        ("The M.I.A.", "m i a"),
+        ("Στελλάς", "στελλασ"),
+        ("", ""),
+    ],
+)
+def test_with_punctuation(input_str: str, expected: str) -> None:
+    assert text.to_identity_match_form_with_punctuation(input_str) == expected
+
+
+# --- step 8: trailing /N disambiguator ---
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        ("John Smith /1", "john smith"),
+        ("Various /17", "various"),
+        ("Track 1/12", "track 1/12"),
+        ("Side A/B", "side a/b"),
+        ("The John Smith /3 (1995)", "john smith"),
+        ("Stereolab", "stereolab"),
+        ("", ""),
+    ],
+)
+def test_with_disambiguator_strip(input_str: str, expected: str) -> None:
+    assert text.to_identity_match_form_with_disambiguator_strip(input_str) == expected
