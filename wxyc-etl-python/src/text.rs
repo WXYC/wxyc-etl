@@ -15,6 +15,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_ascii_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_identity_match_form, m)?)?;
+    m.add_function(wrap_pyfunction!(to_identity_match_form_title, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        to_identity_match_form_with_punctuation,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        to_identity_match_form_with_disambiguator_strip,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(batch_to_storage_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_ascii_form, m)?)?;
@@ -130,6 +139,37 @@ fn to_ascii_form(s: Option<&str>) -> String {
 #[pyfunction]
 fn to_identity_match_form(s: Option<&str>) -> String {
     s.map(wxyc_etl::text::to_identity_match_form)
+        .unwrap_or_default()
+}
+
+/// Title counterpart to `to_identity_match_form`. Use for cross-cache title
+/// identity matching; never strips trailing `/N` (titles use `Side A/2`-style
+/// disambiguators meaningfully).
+#[pyfunction]
+fn to_identity_match_form_title(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_identity_match_form_title)
+        .unwrap_or_default()
+}
+
+/// `to_identity_match_form` + plan §3.3.2 step 6: collapse runs of
+/// punctuation/symbol characters to a single ASCII space.
+///
+/// Opt-in: ships locked-on only if the regression report (plan §3.3.4) shows
+/// per-step shift ≤2%; otherwise stays opt-in.
+#[pyfunction]
+fn to_identity_match_form_with_punctuation(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_identity_match_form_with_punctuation)
+        .unwrap_or_default()
+}
+
+/// `to_identity_match_form` + plan §3.3.2 step 8: strip a trailing
+/// `\s*/\d+` Discogs artist-disambiguator suffix.
+///
+/// **Artists only.** Titles use `to_identity_match_form_title`, which does
+/// not strip `/N` (track-side disambiguators like `Side A/2` are meaningful).
+#[pyfunction]
+fn to_identity_match_form_with_disambiguator_strip(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_identity_match_form_with_disambiguator_strip)
         .unwrap_or_default()
 }
 

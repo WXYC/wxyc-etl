@@ -10,13 +10,25 @@
 //! parens and leading articles that `to_match_form` preserves for FTS5 /
 //! prefix-lookup users.
 //!
-//! This module ships the locked-on baseline (steps 4 + 5 from plan §3.3.2).
-//! The opt-in step-6 (punctuation) and step-8 (`/N` disambiguator) variants
-//! and the full parity matrix ship in a follow-up PR; the regression-report
-//! harness ships in a third.
+//! Public surface:
 //!
-//! Locked-on means: the regression-report `D` per-step shift on these rules
-//! triggers algorithm refinement, *not* opt-out (plan §3.3.4).
+//! - [`to_identity_match_form`] — locked-on baseline (steps 4 + 5).
+//! - [`to_identity_match_form_title`] — title-side counterpart; same as base
+//!   today. Distinct symbol so callers explicitly opt out of the artist-only
+//!   `/N` disambiguator strip; future step-6 promotion stays type-safe.
+//! - [`to_identity_match_form_with_punctuation`] — opt-in: adds step 6
+//!   (punctuation collapse). Ships if the regression report's per-step shift
+//!   on this rule is ≤2%; otherwise stays opt-in indefinitely (plan §3.3.4).
+//! - [`to_identity_match_form_with_disambiguator_strip`] — opt-in: adds
+//!   step 8 (trailing `/N` disambiguator strip). Artists only; titles use
+//!   `_title` since `Side A/2` is meaningful disambiguation.
+//!
+//! Locked-on means: the regression-report `D` per-step shift on steps 4 + 5
+//! triggers algorithm refinement, *not* opt-out (plan §3.3.4). Opt-in steps
+//! 6 and 8 are exposed under separate function names so callers (and the
+//! eventual Postgres analog) audit the choice at the call site.
+use unicode_categories::UnicodeCategories;
+
 use super::forms::{collapse_and_trim_ascii_space, to_match_form};
 
 /// Identity-match form. The canonical entry point for cross-cache identity
@@ -51,10 +63,122 @@ use super::forms::{collapse_and_trim_ascii_space, to_match_form};
 ///
 /// Idempotent on every input: `to_identity_match_form(to_identity_match_form(s)) == to_identity_match_form(s)`.
 pub fn to_identity_match_form(s: &str) -> String {
+    identity_baseline(s)
+}
+
+/// Title counterpart to [`to_identity_match_form`]. Currently identical to the
+/// base function — exists as a separate public symbol so:
+/// - Callers explicitly type-distinguish artist vs title at the call site,
+///   making it impossible to accidentally hand a title to
+///   `to_identity_match_form_with_disambiguator_strip` (which would strip
+///   `Side A/2` style track-side disambiguators).
+/// - When step 6 (punctuation collapse) eventually promotes to locked-on, the
+///   title surface remains stable for callers that already typed against this
+///   symbol.
+///
+/// Idempotent.
+pub fn to_identity_match_form_title(s: &str) -> String {
+    identity_baseline(s)
+}
+
+/// [`to_identity_match_form`] + plan §3.3.2 step 6: replace each run of
+/// punctuation/symbol characters (anything that is not a Unicode letter,
+/// number, or whitespace) with a single ASCII space, then re-collapse and
+/// re-trim. Examples:
+///
+/// - `Godspeed You! Black Emperor` → `godspeed you black emperor`
+/// - `M.I.A.` → `m i a`
+/// - `+/-` → ``  (entirely punctuation; reduces to empty — caller's fallback)
+///
+/// Opt-in: gated behind this separately-named function until the regression
+/// report shows the per-step shift on real cache data is ≤2%, at which point
+/// the project lead may promote it to locked-on. Until then, callers that
+/// want this behavior have to opt in explicitly.
+///
+/// Idempotent.
+pub fn to_identity_match_form_with_punctuation(s: &str) -> String {
+    let m = to_match_form(s);
+    let m = strip_trailing_parens(&m);
+    let m = drop_articles(m);
+    let m = collapse_punctuation_to_space(&m);
+    collapse_and_trim_ascii_space(&m)
+}
+
+/// [`to_identity_match_form`] + plan §3.3.2 step 8: strip a trailing
+/// `\s*/\d+` (Discogs artist-disambiguator suffix) at end-of-string.
+/// Examples:
+///
+/// - `John Smith /1` → `john smith`
+/// - `Various /17` → `various`
+/// - `Track 1/12` (no leading whitespace before `/`) → `track 1/12`
+///
+/// **Artists only.** Discogs uses `/N` to disambiguate same-name artists
+/// (`John Smith /1` vs `John Smith /2`). Titles use `/N` for legitimate
+/// in-title disambiguation (`Side A/2`, `Track 1/12`). Use
+/// [`to_identity_match_form_title`] for title-side identity matching.
+///
+/// Idempotent.
+pub fn to_identity_match_form_with_disambiguator_strip(s: &str) -> String {
+    let baseline = identity_baseline(s);
+    strip_trailing_disambiguator(&baseline)
+}
+
+fn identity_baseline(s: &str) -> String {
     let m = to_match_form(s);
     let m = strip_trailing_parens(&m);
     let m = drop_articles(m);
     collapse_and_trim_ascii_space(&m)
+}
+
+/// Replace each run of one or more non-letter, non-number, non-whitespace
+/// codepoints with a single ASCII space. Letter/number recognition is
+/// Unicode-property-aware: Greek `α`, Cyrillic `я`, Han `細` all qualify
+/// as letters. The output may have leading/trailing/runs-of space; the
+/// caller is expected to follow with [`collapse_and_trim_ascii_space`].
+fn collapse_punctuation_to_space(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_was_replacement = false;
+    for c in s.chars() {
+        if c.is_letter() || c.is_number() || c.is_whitespace() {
+            out.push(c);
+            prev_was_replacement = false;
+        } else if !prev_was_replacement {
+            out.push(' ');
+            prev_was_replacement = true;
+        }
+    }
+    out
+}
+
+/// Strip a trailing `\s+/\d+` group. The leading whitespace is **required**:
+/// `John Smith /1` strips, `Track 1/12` does not. The original spec's regex
+/// (`\s*/\d+$`) is zero-or-more whitespace, but the spec doc itself names
+/// `Track 1/12` as a step-8 negative (it survives because the `/` follows a
+/// digit with no space). Requiring `\s+` makes the in-the-wild Discogs
+/// convention (`Artist /N`, always with a space) match while preserving
+/// genuine in-string `X/Y` patterns.
+fn strip_trailing_disambiguator(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut end = bytes.len();
+    if end == 0 || !bytes[end - 1].is_ascii_digit() {
+        return s.to_string();
+    }
+    while end > 0 && bytes[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == 0 || bytes[end - 1] != b'/' {
+        return s.to_string();
+    }
+    let slash = end - 1;
+    let mut after_spaces = slash;
+    while after_spaces > 0 && bytes[after_spaces - 1] == b' ' {
+        after_spaces -= 1;
+    }
+    if after_spaces == slash {
+        // No whitespace before the slash — `Track 1/12` style. Preserve.
+        return s.to_string();
+    }
+    s[..after_spaces].to_string()
 }
 
 /// Strip a single trailing `(...)` or `[...]` group plus any preceding ASCII
@@ -338,6 +462,166 @@ mod tests {
                 to_identity_match_form(s),
                 "idempotence broken for {s:?}"
             );
+        }
+    }
+
+    // --- title variant: same as base today ---
+
+    #[test]
+    fn title_variant_matches_base() {
+        for s in [
+            "Stereolab",
+            "The Sun Also Rises",
+            "Foo (Live)",
+            "Bar, The",
+            "",
+        ] {
+            assert_eq!(
+                to_identity_match_form_title(s),
+                to_identity_match_form(s),
+                "title variant diverged from base for {s:?}"
+            );
+        }
+    }
+
+    // --- step 6: punctuation collapse (with_punctuation variant) ---
+
+    #[test]
+    fn punctuation_collapses_dots() {
+        assert_eq!(to_identity_match_form_with_punctuation("M.I.A."), "m i a");
+    }
+
+    #[test]
+    fn punctuation_collapses_excitement() {
+        assert_eq!(
+            to_identity_match_form_with_punctuation("Godspeed You! Black Emperor"),
+            "godspeed you black emperor"
+        );
+    }
+
+    #[test]
+    fn punctuation_collapses_run_of_punctuation_to_single_space() {
+        // Per spec: replace each run of punctuation chars with one ASCII space.
+        assert_eq!(to_identity_match_form_with_punctuation("!!!"), "");
+        assert_eq!(to_identity_match_form_with_punctuation("+/-"), "");
+        assert_eq!(to_identity_match_form_with_punctuation("R.E.M."), "r e m");
+    }
+
+    #[test]
+    fn punctuation_preserves_letters_and_numbers() {
+        assert_eq!(
+            to_identity_match_form_with_punctuation("10,000 Maniacs"),
+            "10 000 maniacs"
+        );
+    }
+
+    #[test]
+    fn punctuation_preserves_unicode_letters() {
+        // Greek/Cyrillic/Han letters survive the punctuation pass.
+        assert_eq!(
+            to_identity_match_form_with_punctuation("Στελλάς"),
+            "στελλασ"
+        );
+    }
+
+    #[test]
+    fn punctuation_runs_after_paren_strip() {
+        // Trailing-paren strip happens first, so `(Live)` is gone before step 6
+        // sees the input. The remaining punctuation is what gets collapsed.
+        assert_eq!(
+            to_identity_match_form_with_punctuation("Foo!Bar (Live)"),
+            "foo bar"
+        );
+    }
+
+    #[test]
+    fn punctuation_after_article_drop() {
+        assert_eq!(
+            to_identity_match_form_with_punctuation("The M.I.A."),
+            "m i a"
+        );
+    }
+
+    #[test]
+    fn punctuation_idempotent() {
+        for s in [
+            "M.I.A.",
+            "10,000 Maniacs",
+            "Godspeed You! Black Emperor",
+            "Foo!Bar (Live)",
+            "",
+        ] {
+            let once = to_identity_match_form_with_punctuation(s);
+            let twice = to_identity_match_form_with_punctuation(&once);
+            assert_eq!(once, twice, "idempotence broken for {s:?}");
+        }
+    }
+
+    // --- step 8: trailing /N disambiguator strip ---
+
+    #[test]
+    fn disambiguator_strips_one_digit() {
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("John Smith /1"),
+            "john smith"
+        );
+    }
+
+    #[test]
+    fn disambiguator_strips_multi_digit() {
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("Various /17"),
+            "various"
+        );
+    }
+
+    #[test]
+    fn disambiguator_requires_leading_space_before_slash() {
+        // `Track 1/12` has no whitespace before `/`; preserved.
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("Track 1/12"),
+            "track 1/12"
+        );
+    }
+
+    #[test]
+    fn disambiguator_does_not_strip_trailing_letter() {
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("Side A/B"),
+            "side a/b"
+        );
+    }
+
+    #[test]
+    fn disambiguator_strips_after_paren_and_article_drops() {
+        // Pipeline order: to_match_form → parens → article → re-collapse → /N.
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("The John Smith /3 (1995)"),
+            "john smith"
+        );
+    }
+
+    #[test]
+    fn disambiguator_no_match_passes_through() {
+        assert_eq!(
+            to_identity_match_form_with_disambiguator_strip("Stereolab"),
+            "stereolab"
+        );
+    }
+
+    #[test]
+    fn disambiguator_idempotent() {
+        for s in [
+            "John Smith /1",
+            "Various /17",
+            "Track 1/12",
+            "The John Smith /3 (1995)",
+            "Stereolab",
+            "",
+        ] {
+            let once = to_identity_match_form_with_disambiguator_strip(s);
+            let twice = to_identity_match_form_with_disambiguator_strip(&once);
+            assert_eq!(once, twice, "idempotence broken for {s:?}");
         }
     }
 }
