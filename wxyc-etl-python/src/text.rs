@@ -14,6 +14,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_storage_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_ascii_form, m)?)?;
+    m.add_function(wrap_pyfunction!(to_identity_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_storage_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_ascii_form, m)?)?;
@@ -114,6 +115,22 @@ fn to_match_form(s: Option<&str>) -> String {
 #[pyfunction]
 fn to_ascii_form(s: Option<&str>) -> String {
     s.map(wxyc_etl::text::to_ascii_form).unwrap_or_default()
+}
+
+/// Cross-cache-identity match form: `to_match_form` + trailing-paren strip
+/// + leading-article drop (incl. Discogs `Beatles, The` comma form).
+///
+/// Use this for resolving `library_id ↔ discogs_master_id ↔ MBID ↔ Q-id`
+/// joins. Strictly more aggressive than `to_match_form`; do NOT use for
+/// FTS5 / prefix-lookup callers that need `(Live)` and articles preserved.
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL.
+///
+/// Spec: `docs/normalization.md` in the wxyc-etl repo.
+#[pyfunction]
+fn to_identity_match_form(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::to_identity_match_form)
+        .unwrap_or_default()
 }
 
 /// Apply [`to_storage_form`] to each input in one cross-FFI call.

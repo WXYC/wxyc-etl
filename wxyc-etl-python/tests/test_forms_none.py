@@ -16,8 +16,8 @@ from wxyc_etl import text
 
 @pytest.mark.parametrize(
     "fn",
-    [text.to_storage_form, text.to_match_form, text.to_ascii_form],
-    ids=["to_storage_form", "to_match_form", "to_ascii_form"],
+    [text.to_storage_form, text.to_match_form, text.to_ascii_form, text.to_identity_match_form],
+    ids=["to_storage_form", "to_match_form", "to_ascii_form", "to_identity_match_form"],
 )
 def test_charter_forms_accept_none(fn) -> None:
     assert fn(None) == ""
@@ -25,8 +25,8 @@ def test_charter_forms_accept_none(fn) -> None:
 
 @pytest.mark.parametrize(
     "fn",
-    [text.to_storage_form, text.to_match_form, text.to_ascii_form],
-    ids=["to_storage_form", "to_match_form", "to_ascii_form"],
+    [text.to_storage_form, text.to_match_form, text.to_ascii_form, text.to_identity_match_form],
+    ids=["to_storage_form", "to_match_form", "to_ascii_form", "to_identity_match_form"],
 )
 def test_charter_forms_still_accept_str(fn) -> None:
     """Sanity: the None-overload didn't break the str path."""
