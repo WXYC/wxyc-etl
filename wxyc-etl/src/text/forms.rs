@@ -169,7 +169,7 @@ fn strip_cf_except_zwj(s: &str) -> String {
 /// and trailing ASCII space. Other whitespace (TAB U+0009, etc.) is left
 /// alone — `tab\there` remains `tab\there` because TSV column-boundary
 /// hazards are intentional probes, not noise to scrub.
-fn collapse_and_trim_ascii_space(s: &str) -> String {
+pub(super) fn collapse_and_trim_ascii_space(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_space = true;
     for c in s.chars() {
