@@ -58,10 +58,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install wxyc_unaccent rules into the PG service container
+        # The Postgres `unaccent` extension loads custom rules files from the
+        # server's `$SHAREDIR/tsearch_data/` directory. The service container
+        # doesn't see the runner's checkout, so docker cp the rules + version
+        # files into the container before any tests touch the dictionary.
+        run: |
+          PG_CID=$(docker ps -q --filter ancestor=postgres:16-alpine)
+          if [ -z "$PG_CID" ]; then
+            echo "no postgres:16-alpine service container running" >&2
+            exit 1
+          fi
+          docker cp data/wxyc_unaccent.rules \
+            "$PG_CID:/usr/share/postgresql/16/tsearch_data/wxyc_unaccent.rules"
+          docker cp data/wxyc_unaccent.version \
+            "$PG_CID:/usr/share/postgresql/16/tsearch_data/wxyc_unaccent.version"
+          docker exec "$PG_CID" ls -la \
+            /usr/share/postgresql/16/tsearch_data/wxyc_unaccent.rules
       - name: Run Rust tests with PostgreSQL
         env:
           TEST_DATABASE_URL: postgresql://wxyc_etl:wxyc_etl@localhost:5433/postgres
         run: cargo test --workspace -- --test-threads=1
+      - name: Run Rust ↔ Postgres parity test (ignored by default)
+        env:
+          TEST_DATABASE_URL: postgresql://wxyc_etl:wxyc_etl@localhost:5433/postgres
+        run: |
+          cargo test --workspace --test postgres_parity_test \
+            -- --include-ignored --test-threads=1
 
   python-wheel:
     runs-on: ubuntu-latest
