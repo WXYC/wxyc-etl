@@ -70,6 +70,13 @@ fn version_path() -> PathBuf {
 /// Generate the rules content. No comments (Postgres `unaccent` does not
 /// support `#` comment lines — it parses every line as a rule). Version
 /// metadata lives in the sibling `wxyc_unaccent.version` file.
+///
+/// Skipping rule: emit only chars `c` where `lower(c) == c`. Postgres
+/// applies `lower()` before `unaccent()`, so any char that lowercases to
+/// something else is already transformed away before the dictionary
+/// matches. This excludes the obvious `Σ`/`É`/`À` capitals but also Greek
+/// titlecase like `ᾈ` (Unicode category `Lt` — `is_uppercase()` returns
+/// false but `to_lowercase()` still changes them).
 fn generate_rules() -> String {
     let mut entries: Vec<(u32, String, String)> = Vec::new();
     for &(start, end) in RANGES {
@@ -77,10 +84,11 @@ fn generate_rules() -> String {
             let Some(c) = char::from_u32(cp) else {
                 continue;
             };
-            if c.is_uppercase() {
+            let input = c.to_string();
+            let lowered: String = c.to_lowercase().collect();
+            if lowered != input {
                 continue;
             }
-            let input = c.to_string();
             let output = to_match_form(&input);
             if output == input || output.is_empty() {
                 continue;
@@ -111,7 +119,13 @@ fn rules_file_matches_generator() {
     let rules = rules_path();
     let version = version_path();
 
-    if std::env::var("WXYC_REGENERATE_RULES").is_ok() {
+    // Require an explicit non-empty value so an accidentally-exported
+    // empty env var doesn't silently rewrite the committed files.
+    if std::env::var("WXYC_REGENERATE_RULES")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .is_some()
+    {
         fs::write(&rules, &expected_rules).expect("write rules file");
         fs::write(&version, &expected_version).expect("write version file");
         eprintln!("regenerated {} + {}", rules.display(), version.display());

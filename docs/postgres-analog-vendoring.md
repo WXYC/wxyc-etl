@@ -50,24 +50,31 @@ Same shape for the SQL file.
 
 ### Migration version assertion (consumer side)
 
-The migration that installs the functions reads the deployed `wxyc_unaccent.version` from `$SHAREDIR/tsearch_data` and fails fast on mismatch:
+The authoritative version check is the SHA-256 pin in `wxyc-etl-pin.txt`, verified by CI before the migration runs. The consumer's deploy tooling is responsible for ensuring the file landed at `$SHAREDIR/tsearch_data/wxyc_unaccent.rules` and matches the pinned SHA.
 
-```sql
-DO $$
-DECLARE
-  deployed text;
-  expected constant text := '0.1.0';  -- update in lockstep with wxyc-etl-pin.txt
-BEGIN
-  SELECT trim(pg_read_file('extension/wxyc_unaccent.version', 0, 64, true))
-    INTO deployed;
-  IF deployed IS NULL OR deployed != expected THEN
-    RAISE EXCEPTION 'wxyc_unaccent version mismatch: deployed=%, expected=%',
-      deployed, expected;
-  END IF;
-END $$;
-```
+A runtime check inside the migration is **optional** and constrained: `pg_read_file` resolves relative paths against the cluster's data directory (`$PGDATA`), not `$SHAREDIR`, so there is no portable relative path to the rules file. Consumers that want a defense-in-depth runtime check have two options:
 
-(Path is `extension/wxyc_unaccent.version` because `pg_read_file` resolves relative to `$SHAREDIR`.)
+1. **Hardcode an absolute path** (server-install-specific; requires the calling role to have `pg_read_server_files` membership):
+
+   ```sql
+   DO $$
+   DECLARE
+     deployed text;
+     expected constant text := '0.1.0';  -- update in lockstep with wxyc-etl-pin.txt
+     rules_path constant text :=
+       '/usr/local/share/postgresql/tsearch_data/wxyc_unaccent.version';  -- alpine
+   BEGIN
+     SELECT trim(pg_read_file(rules_path, 0, 64, true)) INTO deployed;
+     IF deployed IS NULL OR deployed != expected THEN
+       RAISE EXCEPTION 'wxyc_unaccent version mismatch: deployed=%, expected=%',
+         deployed, expected;
+     END IF;
+   END $$;
+   ```
+
+   This requires the consumer's migration to know its server install layout (alpine vs Debian vs Homebrew differ; see `scripts/install_wxyc_unaccent.sh`).
+
+2. **Skip the runtime check entirely** and rely on the SHA pin + CI verification step described in the previous section. Recommended default for new consumers — the SHA is a stronger guarantee than a version string anyway.
 
 ### Installing the rules file on the server
 
@@ -89,8 +96,13 @@ Consumer repo migration tooling is expected to do the equivalent on its deploy t
 4. Each consumer opens a vendor-bump PR:
    - Replace its vendored copies of `wxyc_unaccent.rules` + `wxyc_unaccent.version` + `wxyc_identity_match_functions.sql`.
    - Update `wxyc-etl-pin.txt` SHAs + versions.
-   - Update the `expected` literal in its migration version-assertion DO block.
+   - Update the `expected` literal in its migration version-assertion DO block (if the consumer enabled the runtime check).
    - Re-run its repo's parity test against the new files.
+
+### Known coverage limits
+
+- **Cf strip is BMP-only.** `wxyc_match_form` strips format characters from the Basic Multilingual Plane (U+0000–U+FFFF) but not from supplementary planes (U+E0001 language tag, U+E0020–U+E007F tag characters, U+13430–U+13438 Egyptian hieroglyph format controls). Rust's `strip_cf_except_zwj` covers the full Cf category. If a future `to_match_form` change adds supplementary-plane Cf to the fixture, the rules file alone won't unblock parity — the plpgsql `cf_pattern` builder also has to grow. The bump procedure should re-run the parity test against the new fixture before declaring rules-only changes sufficient.
+- **Mojibake repair is application-side.** `to_storage_form`'s ftfy-style mojibake fix runs in Rust before `to_match_form` sees the input. The Postgres pipeline assumes inputs are already storage-form (post-mojibake). Catalog writers are responsible for that pass.
 
 ### Why two files instead of one rules file with an embedded header
 

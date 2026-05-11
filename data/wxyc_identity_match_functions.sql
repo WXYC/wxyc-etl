@@ -177,7 +177,9 @@ BEGIN
     END IF;
   END LOOP;
   FOREACH art IN ARRAY ARRAY[', the', ', a', ', an'] LOOP
-    IF s LIKE '%' || art THEN
+    -- Suffix check via `right()` rather than `LIKE '%' || art` so a future
+    -- article containing `%` or `_` doesn't trigger wildcard semantics.
+    IF length(s) >= length(art) AND right(s, length(art)) = art THEN
       stripped := substr(s, 1, length(s) - length(art));
       IF length(stripped) > 0 THEN
         RETURN stripped;

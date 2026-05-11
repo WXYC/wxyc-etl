@@ -232,5 +232,25 @@ fn postgres_parity_covers_all_four_entry_points() {
             .unwrap_or_else(|e| panic!("{fn_name} smoke failed: {e:?}"));
         let got: Option<String> = row.get(0);
         assert_eq!(got.as_deref(), Some("stereolab"), "{fn_name} smoke");
+
+        // Idempotence: each function applied to its own output must produce
+        // the same result. Mirrors the Rust-side idempotence assertions in
+        // `wxyc_etl::text::identity::tests`. Uses a composed input so the
+        // article-drop + paren-strip layers are exercised.
+        let probe = "   The Foo Fighters (1995)   ";
+        let once_row = client
+            .query_one(&format!("SELECT {fn_name}($1)"), &[&probe])
+            .unwrap_or_else(|e| panic!("{fn_name} idempotence-1 failed: {e:?}"));
+        let once: Option<String> = once_row.get(0);
+        let once = once.expect("non-null output");
+        let twice_row = client
+            .query_one(&format!("SELECT {fn_name}($1)"), &[&once])
+            .unwrap_or_else(|e| panic!("{fn_name} idempotence-2 failed: {e:?}"));
+        let twice: Option<String> = twice_row.get(0);
+        assert_eq!(
+            twice.as_deref(),
+            Some(once.as_str()),
+            "{fn_name} not idempotent: once={once:?} twice={twice:?}"
+        );
     }
 }
