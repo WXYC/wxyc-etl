@@ -31,7 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: v
         name: Verify Cargo.toml version matches tag
         shell: bash
@@ -52,7 +52,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo publish (dry-run)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -79,8 +79,8 @@ jobs:
           - { os: macos-latest,      target: aarch64-apple-darwin,      manylinux: '' }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       # `-i python3.12` tells maturin which interpreter headers to build against
@@ -103,7 +103,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: wxyc-etl-python
