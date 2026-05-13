@@ -2,6 +2,49 @@
 
 Shared Rust crate (with PyO3 Python bindings) that supplies the cross-cutting primitives used by every WXYC ETL repo: text normalization, fuzzy matching, PostgreSQL bulk loading, a parallel pipeline framework, a MySQL-dump parser, schema constants, and JSON state tracking.
 
+## Tag Stability Policy (READ BEFORE EDITING `.github/workflows/`)
+
+This repo publishes a reusable GitHub Actions workflow that other WXYC repos consume by tag:
+
+- `check-ci-marker-sync.yml` — consumed as `WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@gha/v1`
+
+`gha/v1` is a **moving major tag**. It points at the latest commit on `main` that is non-breaking for the v1 contract. Consumers pin to `@gha/v1` to opt into compatible improvements; they pin to a SHA only if they want frozen behavior.
+
+### Before changing any reusable workflow, decide: is this breaking?
+
+A change is **breaking** if it does any of the following to a `workflow_call`-enabled file:
+
+1. Adds a new required `inputs:` entry, or removes/renames an existing input.
+2. Adds a new required `secrets:` entry, or removes/renames an existing secret.
+3. Removes or renames an `outputs:` entry.
+4. Changes the default value of an existing input in a way a consumer could depend on.
+5. Changes observable behavior consumers rely on — e.g. the marker-sync check now rejects a marker scheme it previously accepted, the runner OS major version bumps, a step that produced an artifact stops producing it.
+
+Anything else is **non-breaking**: bugfixes, perf work, internal refactors, *additive* optional inputs/outputs/secrets, dependency bumps that don't change observable behavior. Note: changes to `scripts/check_marker_ci_sync.py` flow into consumers via this workflow — apply the same checklist to that script.
+
+### The bump procedure
+
+**Non-breaking change** — re-point `gha/v1` at the new commit after merge:
+
+```bash
+git fetch origin
+git tag -f gha/v1 origin/main
+git push --force origin gha/v1
+```
+
+**Breaking change** — *do not move `gha/v1`*. Cut `gha/v2` instead:
+
+```bash
+git tag -a gha/v2 -m "v2: <one-line summary of what broke>" origin/main
+git push origin gha/v2
+```
+
+Then file a migration ticket in every consumer repo that pins `@gha/v1` for this workflow. Search the org with `gh search code 'WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@gha/v1'` to find them.
+
+### Why this matters
+
+Force-pushing `gha/v1` past a breaking change silently breaks every consumer's CI the next time their workflow fires. Consumers have no signal — the `@gha/v1` ref is the same string they had yesterday. The cost of cutting `gha/v2` is one tag and one round of consumer PRs; the cost of breaking `gha/v1` is debugging in a dozen repos at once.
+
 ## Workspace Layout
 
 Cargo workspace with two members:
@@ -198,7 +241,7 @@ Four jobs on push to `main` and on PR:
 # in another repo's .github/workflows/ci.yml
 jobs:
   marker-sync:
-    uses: WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@main
+    uses: WXYC/wxyc-etl/.github/workflows/check-ci-marker-sync.yml@gha/v1
     with:
       repo-path: "."           # or "subpkg/" if pyproject lives in a subdir
       workflows-dir: ".github/workflows"
