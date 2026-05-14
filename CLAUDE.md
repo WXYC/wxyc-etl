@@ -45,6 +45,21 @@ Then file a migration ticket in every consumer repo that pins `@gha/v1` for this
 
 Force-pushing `gha/v1` past a breaking change silently breaks every consumer's CI the next time their workflow fires. Consumers have no signal — the `@gha/v1` ref is the same string they had yesterday. The cost of cutting `gha/v2` is one tag and one round of consumer PRs; the cost of breaking `gha/v1` is debugging in a dozen repos at once.
 
+### Caller permissions contract
+
+Callers of `check-ci-marker-sync.yml` must grant at minimum:
+
+```yaml
+permissions:
+  contents: read   # the reusable workflow checks out the calling repo
+```
+
+The workflow declares no `permissions:` block of its own — it doesn't write anywhere, just runs `scripts/check_marker_ci_sync.py` against the caller's checkout. The caller's `contents: read` is enough; granting less makes the `actions/checkout` step fail.
+
+**Escalating the required caller permissions is itself a breaking change** (rule 5 above — observable behavior). If a revision of this workflow needs another scope from the caller (e.g., `pull-requests: write` to comment on a PR with the marker diff), cut `gha/v2` and migrate consumers. The asymmetry matters: dropping a required scope is non-breaking; adding one breaks every caller that hardened to the previous floor.
+
+Watch for the **caller-callee narrowing trap** when adding a `permissions:` block to this workflow: if a reusable workflow declares `contents: write` at the workflow level (e.g., to push a fix-up commit) but its callers hardened to `contents: read`, the matrix run startup_failures with no jobs and no obvious error. See [WXYC/Backend-Service#857](https://github.com/WXYC/Backend-Service/issues/857) (silent for 10 commits across 2 days) and PR [#858](https://github.com/WXYC/Backend-Service/pull/858) for the recovery pattern. `check-ci-marker-sync.yml` is read-only today, so it can't trip this — but the trap applies to any future revision that takes a write scope, and a `gha/v2` migration is the safest way to surface it.
+
 ## Workspace Layout
 
 Cargo workspace with two members:
