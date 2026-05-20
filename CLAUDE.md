@@ -67,7 +67,7 @@ This repo also publishes the `wxyc-postgres` image (see `infra/wxyc-postgres/` a
 | Tag | Consumer expectation |
 |---|---|
 | `:pg17`, `:pg16` | Floating. Moves on every wxyc-etl release. Suitable for staging. |
-| `:pg17-v0.4.X`, `:pg16-v0.4.X` | Pinned. Production Railway services pin here; rollback target. |
+| `:pg17-vMAJOR.MINOR.PATCH`, `:pg16-vMAJOR.MINOR.PATCH` | Pinned (e.g. `:pg17-v0.4.1`). Production Railway services pin here; rollback target. |
 
 The base image must stay on `ghcr.io/railwayapp-templates/postgres-ssl:N@sha256:<digest>` (digest-pinned, not floating). Refreshing the base digest is a release event — bump `Cargo.toml`, tag, ship a new pinned image, then operators swap each Railway PG one-by-one. **Don't move the base off `railwayapp-templates/postgres-ssl`** — Railway services depend on its SSL init hook, pgbackrest, pgvector, and `wrapper.sh` entrypoint; switching to stock `postgres:N` would silently strip all four.
 

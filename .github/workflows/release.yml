@@ -176,28 +176,37 @@ jobs:
           SHAREDIR="/usr/share/postgresql/${PG}"
           EXPECTED_SHA=$(sha256sum data/wxyc_unaccent.rules | awk '{print $1}')
           docker run --rm -d --name wxyc-pg-smoke -e POSTGRES_PASSWORD=smoke "$IMG"
-          # Wait for PG to accept connections (up to 60s)
+          # Unconditional cleanup + log dump on any exit path so the container
+          # never lingers and a failed step always surfaces PG startup output.
+          trap 'docker logs wxyc-pg-smoke 2>&1 || true; docker stop wxyc-pg-smoke >/dev/null 2>&1 || true' EXIT
+          # Wait for PG to accept connections (up to 60s); fail fast if it never does.
+          READY=0
           for _ in $(seq 1 60); do
-            if docker exec wxyc-pg-smoke pg_isready -U postgres >/dev/null 2>&1; then break; fi
+            if docker exec wxyc-pg-smoke pg_isready -U postgres >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
             sleep 1
           done
+          if [[ "$READY" -ne 1 ]]; then
+            echo "::error ::Postgres did not become ready within 60s"
+            exit 1
+          fi
           ACTUAL_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.rules" | awk '{print $1}')
           if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
             echo "::error ::wxyc_unaccent.rules SHA-256 mismatch in image: expected $EXPECTED_SHA, got $ACTUAL_SHA"
-            docker logs wxyc-pg-smoke || true
-            docker stop wxyc-pg-smoke || true
             exit 1
           fi
           STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
             "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.rules')).size > 0;")
           if [[ "$STAT_OK" != "t" ]]; then
             echo "::error ::pg_stat_file did not report a non-empty rules file: $STAT_OK"
-            docker stop wxyc-pg-smoke || true
             exit 1
           fi
+          # DROP IF EXISTS keeps the smoke idempotent across job re-runs even
+          # though `docker run --rm` discards the container each time.
           RESULT=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
-            "CREATE EXTENSION IF NOT EXISTS unaccent; CREATE TEXT SEARCH DICTIONARY wxyc_unaccent (TEMPLATE = unaccent, RULES = 'wxyc_unaccent'); SELECT ts_lexize('wxyc_unaccent', 'café');")
-          docker stop wxyc-pg-smoke
+            "CREATE EXTENSION IF NOT EXISTS unaccent; DROP TEXT SEARCH DICTIONARY IF EXISTS wxyc_unaccent; CREATE TEXT SEARCH DICTIONARY wxyc_unaccent (TEMPLATE = unaccent, RULES = 'wxyc_unaccent'); SELECT ts_lexize('wxyc_unaccent', 'café');")
           if [[ "$RESULT" != *"{cafe}"* ]]; then
             echo "::error ::ts_lexize('wxyc_unaccent', 'café') returned unexpected: $RESULT"
             exit 1
