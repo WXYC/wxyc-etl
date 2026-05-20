@@ -174,7 +174,8 @@ jobs:
           set -euo pipefail
           IMG="${{ steps.tags.outputs.floating }}"
           SHAREDIR="/usr/share/postgresql/${PG}"
-          EXPECTED_SHA=$(sha256sum data/wxyc_unaccent.rules | awk '{print $1}')
+          EXPECTED_RULES_SHA=$(sha256sum data/wxyc_unaccent.rules | awk '{print $1}')
+          EXPECTED_VERSION_SHA=$(sha256sum data/wxyc_unaccent.version | awk '{print $1}')
           docker run --rm -d --name wxyc-pg-smoke -e POSTGRES_PASSWORD=smoke "$IMG"
           # Unconditional cleanup + log dump on any exit path so the container
           # never lingers and a failed step always surfaces PG startup output.
@@ -192,15 +193,31 @@ jobs:
             echo "::error ::Postgres did not become ready within 60s"
             exit 1
           fi
-          ACTUAL_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.rules" | awk '{print $1}')
-          if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-            echo "::error ::wxyc_unaccent.rules SHA-256 mismatch in image: expected $EXPECTED_SHA, got $ACTUAL_SHA"
+          ACTUAL_RULES_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.rules" | awk '{print $1}')
+          if [[ "$ACTUAL_RULES_SHA" != "$EXPECTED_RULES_SHA" ]]; then
+            echo "::error ::wxyc_unaccent.rules SHA-256 mismatch in image: expected $EXPECTED_RULES_SHA, got $ACTUAL_RULES_SHA"
+            exit 1
+          fi
+          # Verify the .version companion landed too. Dockerfile COPYs both
+          # files; if a future edit drops the .version COPY, the rules-only
+          # checks above would still pass green and consumers that introspect
+          # the version file (per docs/wxyc-postgres-image.md) would silently
+          # see a stock-base image.
+          ACTUAL_VERSION_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.version" | awk '{print $1}')
+          if [[ "$ACTUAL_VERSION_SHA" != "$EXPECTED_VERSION_SHA" ]]; then
+            echo "::error ::wxyc_unaccent.version SHA-256 mismatch in image: expected $EXPECTED_VERSION_SHA, got $ACTUAL_VERSION_SHA"
             exit 1
           fi
           STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
             "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.rules')).size > 0;")
           if [[ "$STAT_OK" != "t" ]]; then
             echo "::error ::pg_stat_file did not report a non-empty rules file: $STAT_OK"
+            exit 1
+          fi
+          VERSION_STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
+            "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.version')).size > 0;")
+          if [[ "$VERSION_STAT_OK" != "t" ]]; then
+            echo "::error ::pg_stat_file did not report a non-empty version file: $VERSION_STAT_OK"
             exit 1
           fi
           # DROP IF EXISTS keeps the smoke idempotent across job re-runs even
