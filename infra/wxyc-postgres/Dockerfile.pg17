@@ -11,6 +11,13 @@
 # Pinned digest sources: gh api /orgs/railwayapp-templates/packages/container/postgres-ssl/versions
 FROM ghcr.io/railwayapp-templates/postgres-ssl:17@sha256:2378464ce08af16eb18c87b8f4024edbb26f48d3e2641b5d238bf517709bb2da
 
+# OCI image labels — GHCR uses `org.opencontainers.image.source` to wire the
+# package page to this repo (visibility inheritance, "view source" link,
+# README surfacing on the package landing page).
+LABEL org.opencontainers.image.source="https://github.com/WXYC/wxyc-etl"
+LABEL org.opencontainers.image.description="Railway postgres-ssl:17 with WXYC wxyc_unaccent.rules baked in"
+LABEL org.opencontainers.image.licenses="MIT"
+
 # $SHAREDIR on this base is /usr/share/postgresql/17 (Debian apt layout).
 # `pg_config --sharedir` reports the same. Confirm with:
 #   docker run --rm --entrypoint /bin/bash <image> -c 'pg_config --sharedir'
