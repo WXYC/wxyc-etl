@@ -1,0 +1,18 @@
+# wxyc-postgres:pg16 — Railway's postgres-ssl:16 with WXYC's text-search dictionary baked in.
+#
+# Build context is the wxyc-etl repo root. The canonical rules file lives at
+# data/wxyc_unaccent.rules and is the upstream source-of-truth for the four
+# identity-match entry points (Rust ↔ Postgres parity, see CLAUDE.md).
+#
+# Refresh procedure: when picking up an upstream postgres-ssl security update,
+# bump the digest below, push the tag, cut a new wxyc-etl release. The base
+# image preserves Railway's SSL init hook, pgbackrest, and pgvector intact.
+#
+# Pinned digest sources: gh api /orgs/railwayapp-templates/packages/container/postgres-ssl/versions
+FROM ghcr.io/railwayapp-templates/postgres-ssl:16@sha256:73561b79111938f821de4d2530f7bb1736eed7b0d666b1a462c4f7e0f1b2a106
+
+# $SHAREDIR on this base is /usr/share/postgresql/16 (Debian apt layout).
+# `pg_config --sharedir` reports the same. Confirm with:
+#   docker run --rm --entrypoint /bin/bash <image> -c 'pg_config --sharedir'
+COPY data/wxyc_unaccent.rules    /usr/share/postgresql/16/tsearch_data/wxyc_unaccent.rules
+COPY data/wxyc_unaccent.version  /usr/share/postgresql/16/tsearch_data/wxyc_unaccent.version
