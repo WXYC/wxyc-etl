@@ -1,16 +1,20 @@
 name: Release
 
-# Tag-driven publish for both halves of the wxyc-etl workspace.
+# Tag-driven publish for both halves of the wxyc-etl workspace plus the
+# wxyc-postgres Docker image.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # A `workflow_dispatch` run with `dry_run: true` (the default) is the safe way
-# to rehearse the pipeline without touching crates.io or PyPI. It runs every
-# build + a `cargo publish --dry-run` and skips the actual upload steps.
+# to rehearse the pipeline without touching crates.io, PyPI, or GHCR. It runs
+# every build + a `cargo publish --dry-run` + a local image build + smoke test,
+# and skips the actual upload / push steps.
 #
 # Required repo secrets (set up once in GitHub → Settings → Secrets):
 #   CRATES_IO_TOKEN   API token from https://crates.io/me — needs `publish-new` + `publish-update` scopes
 #   PYPI_API_TOKEN    API token from https://pypi.org/manage/account/token/ — scope to the `wxyc-etl` project after first publish
+# GHCR uses the default GITHUB_TOKEN with `packages: write` granted on the
+# publish-postgres-image job — no separate secret needed.
 
 on:
   push:
@@ -18,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Skip cargo/PyPI uploads (rehearsal mode)"
+        description: "Skip cargo/PyPI/GHCR uploads (rehearsal mode)"
         type: boolean
         default: true
 
@@ -113,6 +117,106 @@ jobs:
         with:
           name: sdist
           path: wxyc-etl-python/dist
+
+  publish-postgres-image:
+    needs: verify
+    name: image pg${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg: "17"
+            dockerfile: infra/wxyc-postgres/Dockerfile.pg17
+          - pg: "16"
+            dockerfile: infra/wxyc-postgres/Dockerfile.pg16
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.verify.outputs.version }}"
+          PG="${{ matrix.pg }}"
+          FLOATING="ghcr.io/wxyc/wxyc-postgres:pg${PG}"
+          PINNED="ghcr.io/wxyc/wxyc-postgres:pg${PG}-v${VERSION}"
+          echo "floating=${FLOATING}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${FLOATING}"
+            echo "${PINNED}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build (local, single-arch) for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          platforms: linux/amd64
+          tags: ${{ steps.tags.outputs.floating }}
+      - name: Smoke test
+        shell: bash
+        env:
+          PG: ${{ matrix.pg }}
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.tags.outputs.floating }}"
+          SHAREDIR="/usr/share/postgresql/${PG}"
+          EXPECTED_SHA=$(sha256sum data/wxyc_unaccent.rules | awk '{print $1}')
+          docker run --rm -d --name wxyc-pg-smoke -e POSTGRES_PASSWORD=smoke "$IMG"
+          # Wait for PG to accept connections (up to 60s)
+          for _ in $(seq 1 60); do
+            if docker exec wxyc-pg-smoke pg_isready -U postgres >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          ACTUAL_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.rules" | awk '{print $1}')
+          if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "::error ::wxyc_unaccent.rules SHA-256 mismatch in image: expected $EXPECTED_SHA, got $ACTUAL_SHA"
+            docker logs wxyc-pg-smoke || true
+            docker stop wxyc-pg-smoke || true
+            exit 1
+          fi
+          STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
+            "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.rules')).size > 0;")
+          if [[ "$STAT_OK" != "t" ]]; then
+            echo "::error ::pg_stat_file did not report a non-empty rules file: $STAT_OK"
+            docker stop wxyc-pg-smoke || true
+            exit 1
+          fi
+          RESULT=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
+            "CREATE EXTENSION IF NOT EXISTS unaccent; CREATE TEXT SEARCH DICTIONARY wxyc_unaccent (TEMPLATE = unaccent, RULES = 'wxyc_unaccent'); SELECT ts_lexize('wxyc_unaccent', 'café');")
+          docker stop wxyc-pg-smoke
+          if [[ "$RESULT" != *"{cafe}"* ]]; then
+            echo "::error ::ts_lexize('wxyc_unaccent', 'café') returned unexpected: $RESULT"
+            exit 1
+          fi
+      - name: Build + push (multi-arch)
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.tags }}
+      - name: Skip push (dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        shell: bash
+        run: |
+          echo "Dry-run mode: would push the following tags to GHCR:"
+          echo "${{ steps.tags.outputs.tags }}"
 
   publish-pypi:
     needs: [publish-crate, build-wheels, build-sdist]

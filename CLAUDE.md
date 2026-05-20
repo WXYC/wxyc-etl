@@ -60,6 +60,19 @@ The workflow declares no `permissions:` block of its own — it doesn't write an
 
 Watch for the **caller-callee narrowing trap** when adding a `permissions:` block to this workflow: if a reusable workflow declares `contents: write` at the workflow level (e.g., to push a fix-up commit) but its callers hardened to `contents: read`, the matrix run startup_failures with no jobs and no obvious error. See [WXYC/Backend-Service#857](https://github.com/WXYC/Backend-Service/issues/857) (silent for 10 commits across 2 days) and PR [#858](https://github.com/WXYC/Backend-Service/pull/858) for the recovery pattern. `check-ci-marker-sync.yml` is read-only today, so it can't trip this — but the trap applies to any future revision that takes a write scope, and a `gha/v2` migration is the safest way to surface it.
 
+### Docker image consumers (`ghcr.io/wxyc/wxyc-postgres`)
+
+This repo also publishes the `wxyc-postgres` image (see `infra/wxyc-postgres/` and `docs/wxyc-postgres-image.md`), consumed by Railway PG services in discogs-cache, musicbrainz-cache, and wikidata-cache. Image tags are a separate consumer contract:
+
+| Tag | Consumer expectation |
+|---|---|
+| `:pg17`, `:pg16` | Floating. Moves on every wxyc-etl release. Suitable for staging. |
+| `:pg17-v0.4.X`, `:pg16-v0.4.X` | Pinned. Production Railway services pin here; rollback target. |
+
+The base image must stay on `ghcr.io/railwayapp-templates/postgres-ssl:N@sha256:<digest>` (digest-pinned, not floating). Refreshing the base digest is a release event — bump `Cargo.toml`, tag, ship a new pinned image, then operators swap each Railway PG one-by-one. **Don't move the base off `railwayapp-templates/postgres-ssl`** — Railway services depend on its SSL init hook, pgbackrest, pgvector, and `wrapper.sh` entrypoint; switching to stock `postgres:N` would silently strip all four.
+
+A behavior change in `data/wxyc_unaccent.rules` (the bytes consumers see at `$SHAREDIR/tsearch_data/wxyc_unaccent.rules` after swap) is breaking. Today the rules file is the canonical Postgres-side counterpart to `strip_combining_selective + apply_folds`, locked by `wxyc-etl/tests/wxyc_unaccent_rules_test.rs` against the Rust generator; any change to `to_match_form` flows through that test to a new bytes-on-disk for every consumer. Coordinate with the three cache repos before merging such a change.
+
 ## Workspace Layout
 
 Cargo workspace with two members:
@@ -267,7 +280,7 @@ Intentional opt-out for a marker that is, by design, manual-only: add `# ci-sync
 
 ## Releases
 
-Both halves of the workspace publish from the same tag — `wxyc-etl` to crates.io, `wxyc-etl-python` to PyPI. The workspace `version` in the root `Cargo.toml` is the single source of truth; both crates inherit it via `version.workspace = true` and maturin reads it via `pyproject.toml`'s `dynamic = ["version"]`.
+Three artifacts publish from the same tag — `wxyc-etl` to crates.io, `wxyc-etl-python` to PyPI, and `ghcr.io/wxyc/wxyc-postgres:{pg17,pg16}` to GHCR. The workspace `version` in the root `Cargo.toml` is the single source of truth; both crates inherit it via `version.workspace = true`, maturin reads it via `pyproject.toml`'s `dynamic = ["version"]`, and the Docker image tags it as `:pgN-vX.Y.Z` alongside the floating `:pgN`.
 
 ### Cutting a release
 
@@ -286,10 +299,13 @@ The `release.yml` workflow fires on tags matching `v*.*.*`. It:
 2. `cargo publish -p wxyc-etl` to crates.io.
 3. Builds wheels for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` plus an sdist.
 4. `maturin upload --skip-existing dist/*` to PyPI.
+5. Builds + smoke-tests `ghcr.io/wxyc/wxyc-postgres:pg17` and `:pg16` (single-arch local build, `pg_stat_file` + `ts_lexize('wxyc_unaccent', 'café')` against the running container, SHA-256 of the rules file inside the image vs. `data/wxyc_unaccent.rules` on disk). Then `docker/build-push-action@v6` pushes both arches (`linux/amd64`, `linux/arm64`) with floating + pinned tags.
+
+The base for the image is digest-pinned in `infra/wxyc-postgres/Dockerfile.pgN`. Refreshing it is a release event — see `docs/wxyc-postgres-image.md` for the procedure.
 
 ### Rehearsing a release
 
-Use the `workflow_dispatch` trigger with `dry_run: true` (the default). It runs every build step + a `cargo publish --dry-run` and skips the actual upload steps. Safe to run any time.
+Use the `workflow_dispatch` trigger with `dry_run: true` (the default). It runs every build step + a `cargo publish --dry-run` + a local image build with smoke test, and skips the actual upload / push steps. Safe to run any time.
 
 ### Required repo secrets
 
