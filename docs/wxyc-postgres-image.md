@@ -18,8 +18,8 @@ The image is a pure overlay — no other config or behavior change. Pulling `:pg
 |---|---|
 | `:pg17` | Latest wxyc-etl release on Postgres 17. Moves on each release. |
 | `:pg16` | Latest wxyc-etl release on Postgres 16. Moves on each release. |
-| `:pg17-v0.4.1` | Pinned to a specific wxyc-etl release. Preferred for reproducible CI and rollback targets. |
-| `:pg16-v0.4.1` | Pinned. Same rules. |
+| `:pg17-vMAJOR.MINOR.PATCH` | Pinned to a specific wxyc-etl release (e.g. `:pg17-v0.4.1`). Preferred for reproducible CI and rollback targets. |
+| `:pg16-vMAJOR.MINOR.PATCH` | Pinned to a specific wxyc-etl release (e.g. `:pg16-v0.4.1`). Same rules. |
 
 Both arches (linux/amd64 + linux/arm64) ship under every tag.
 
@@ -34,7 +34,7 @@ The Railway PG plugin lets you swap the underlying image without touching the da
 5. Once the new deploy is green, verify the dictionary is live:
 
 ```sql
--- From the cache's `Apply pending alembic migrations` /  `sqlx migrate run` runner,
+-- From the cache's `Apply pending alembic migrations` runner,
 -- or via Railway's "Connect" → SQL panel:
 SELECT ts_lexize('wxyc_unaccent', 'café');
 -- Expected: {cafe}
