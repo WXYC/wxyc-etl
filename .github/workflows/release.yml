@@ -222,8 +222,12 @@ jobs:
     needs: [publish-crate, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     steps:
+      # Filter to wheels + sdist only. docker/build-push-action@v6 uploads
+      # opaque `*.dockerbuild` provenance artifacts to the run that would
+      # otherwise be pulled in here and fail the download step.
       - uses: actions/download-artifact@v4
         with:
+          pattern: "{wheel-*,sdist}"
           path: dist
           merge-multiple: true
       - name: List artifacts
