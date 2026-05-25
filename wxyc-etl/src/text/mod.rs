@@ -21,7 +21,7 @@ pub mod split;
 
 // Convenience re-exports for the most common entry points.
 pub use batch::{batch_filter, batch_to_ascii_form, batch_to_match_form, batch_to_storage_form};
-pub use compilation::{is_compilation_artist, COMPILATION_KEYWORDS};
+pub use compilation::is_compilation_artist;
 pub use filter::{ArtistFilter, TitleFilter};
 pub use forms::{to_ascii_form, to_match_form, to_storage_form};
 pub use identity::{
