@@ -38,13 +38,11 @@ pub fn is_compilation_artist(artist: &str) -> bool {
         return true;
     }
     LEADING_COMPILATION_PREFIXES.iter().any(|prefix| {
-        if !lower.starts_with(prefix) {
-            return false;
-        }
-        match lower[prefix.len()..].chars().next() {
-            None => true,
-            Some(c) => !c.is_alphanumeric(),
-        }
+        lower.starts_with(prefix)
+            && lower[prefix.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_alphanumeric())
     })
 }
 
@@ -52,105 +50,37 @@ pub fn is_compilation_artist(artist: &str) -> bool {
 mod tests {
     use super::*;
 
-    // Positive cases.
-
     #[test]
-    fn various_artists_is_compilation() {
-        assert!(is_compilation_artist("Various Artists"));
-    }
-
-    #[test]
-    fn various_alone_is_compilation() {
-        // Discogs canonical V/A credit.
-        assert!(is_compilation_artist("Various"));
-    }
-
-    #[test]
-    fn various_lowercase_is_compilation() {
-        assert!(is_compilation_artist("various"));
-    }
-
-    #[test]
-    fn various_all_caps_is_compilation() {
-        assert!(is_compilation_artist("VARIOUS"));
-    }
-
-    #[test]
-    fn various_artists_with_wxyc_filing_suffix_is_compilation() {
-        // WXYC physical-catalog filing convention.
-        assert!(is_compilation_artist("Various Artists-Rock-Y"));
-    }
-
-    #[test]
-    fn v_slash_a_is_compilation() {
-        assert!(is_compilation_artist("V/A"));
-    }
-
-    #[test]
-    fn v_dot_a_is_compilation() {
-        assert!(is_compilation_artist("V.A."));
-    }
-
-    #[test]
-    fn soundtrack_alone_is_compilation() {
-        assert!(is_compilation_artist("Soundtrack"));
-    }
-
-    #[test]
-    fn soundtracks_plural_is_compilation() {
-        assert!(is_compilation_artist("Soundtracks"));
-    }
-
-    #[test]
-    fn compilation_alone_is_compilation() {
-        assert!(is_compilation_artist("Compilation"));
-    }
-
-    // Negative cases — real WXYC artists previously misclassified.
-
-    #[test]
-    fn the_soundtrack_of_our_lives_is_real_artist() {
-        // Swedish rock band — WXYC plays this.
-        assert!(!is_compilation_artist("The Soundtrack of Our Lives"));
-    }
-
-    #[test]
-    fn soundtrack_of_our_lives_is_real_artist() {
-        // Same band, alternate credit.
-        assert!(!is_compilation_artist("Soundtrack of Our Lives"));
-    }
-
-    #[test]
-    fn the_various_is_real_artist() {
-        // Australian band.
-        assert!(!is_compilation_artist("The Various"));
-    }
-
-    #[test]
-    fn various_production_is_real_artist() {
-        // UK electronic act — must not match either rule.
-        assert!(!is_compilation_artist("Various Production"));
-    }
-
-    // Generic negative cases.
-
-    #[test]
-    fn stereolab_is_not_compilation() {
-        assert!(!is_compilation_artist("Stereolab"));
-    }
-
-    #[test]
-    fn juana_molina_is_not_compilation() {
-        assert!(!is_compilation_artist("Juana Molina"));
-    }
-
-    #[test]
-    fn cat_power_is_not_compilation() {
-        assert!(!is_compilation_artist("Cat Power"));
-    }
-
-    #[test]
-    fn empty_is_not_compilation() {
-        assert!(!is_compilation_artist(""));
+    fn is_compilation_artist_cases() {
+        // Real-WXYC-artist false-positives the substring rule used to flag:
+        // The Soundtrack of Our Lives (Swedish rock), The Various (Australian
+        // band), Various Production (UK electronic).
+        let cases = [
+            ("Various Artists", true),
+            ("Various", true), // Discogs canonical V/A credit.
+            ("various", true),
+            ("VARIOUS", true),
+            ("Various Artists-Rock-Y", true), // WXYC filing convention.
+            ("V/A", true),
+            ("V.A.", true),
+            ("Soundtrack", true),
+            ("Soundtracks", true),
+            ("Compilation", true),
+            ("The Soundtrack of Our Lives", false),
+            ("Soundtrack of Our Lives", false),
+            ("The Various", false),
+            ("Various Production", false),
+            ("Stereolab", false),
+            ("Juana Molina", false),
+            ("Cat Power", false),
+            ("", false),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                is_compilation_artist(input),
+                expected,
+                "is_compilation_artist({input:?})"
+            );
+        }
     }
 }
