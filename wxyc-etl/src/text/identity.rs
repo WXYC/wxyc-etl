@@ -263,24 +263,24 @@ fn strip_leading_article_with_space_suffix(s: &str) -> Option<&str> {
 /// Strip a leading article (`the`, `a`, `an`) from a lowercased + trimmed
 /// string. Returns the input unchanged when there is no leading article.
 ///
-/// The article must be followed by Unicode whitespace OR end-of-string,
+/// The article must be followed by whitespace OR end-of-string, byte-for-byte
 /// matching the Python `^(the|a|an)(\s+|$)` regex used by
-/// `library-metadata-lookup`'s reconciler and FTS5 prefix-lookup paths so the
-/// cross-cache identity layer and the Python consumers produce byte-identical
-/// outputs (E3 normalization charter; epic [WXYC/wxyc-etl#73]). "Unicode
-/// whitespace" here means [`char::is_whitespace`], which matches the same
-/// `White_Space` property that Python 3's default `\s` matches — i.e. ASCII
-/// space, TAB, NBSP (U+00A0), OGHAM SPACE (U+1680), LINE / PARAGRAPH
-/// SEPARATOR (U+2028 / U+2029), and the other [`Pattern_White_Space`][zs]
-/// codepoints. Step 7 of `to_match_form` preserves non-ASCII whitespace, so
-/// these codepoints can appear in real artist names (e.g. pasted from
-/// Wikipedia) and must round-trip the same on both sides.
+/// `library-metadata-lookup`'s reconciler and FTS5 prefix-lookup paths
+/// (E3 normalization charter; epic [WXYC/wxyc-etl#73]).
+///
+/// "Whitespace" here is the exact codepoint set CPython's `re` engine treats
+/// as `\s` for `str` patterns: the Unicode `White_Space` property (matched by
+/// [`char::is_whitespace`]) plus the four ASCII information separators
+/// U+001C..=U+001F (FS, GS, RS, US — a CPython quirk that pre-dates Unicode
+/// `White_Space` and survives in `Py_UNICODE_ISSPACE`). `to_match_form` does
+/// not strip these — NBSP and the other Zs codepoints with NFKC
+/// decompositions to ASCII space are folded away by step 2, but OGHAM SPACE
+/// (U+1680), LINE / PARAGRAPH SEPARATOR (U+2028 / U+2029), and the info
+/// separators round-trip unchanged and must hash identically on both sides.
 ///
 /// Trailing whitespace after the article is consumed in full
 /// (e.g. `"the  beatles"` → `"beatles"`), matching `\s+` greediness. Only the
 /// first matching article is stripped; `"the the"` → `"the"`.
-///
-/// [zs]: https://www.unicode.org/Public/UCD/latest/ucd/PropList.txt
 ///
 /// # Contract
 ///
@@ -319,12 +319,17 @@ pub fn strip_leading_article(s: &str) -> &str {
             if rest.is_empty() {
                 return rest;
             }
-            if rest.starts_with(|c: char| c.is_whitespace()) {
-                return rest.trim_start_matches(|c: char| c.is_whitespace());
+            if rest.starts_with(is_python_whitespace) {
+                return rest.trim_start_matches(is_python_whitespace);
             }
         }
     }
     s
+}
+
+/// CPython's `\s` for `str` patterns: Unicode `White_Space` ∪ U+001C..=U+001F.
+fn is_python_whitespace(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '\u{1C}'..='\u{1F}')
 }
 
 fn strip_trailing_comma_article(s: &str) -> Option<&str> {
@@ -548,14 +553,29 @@ mod tests {
     }
 
     #[test]
-    fn pub_strip_matches_unicode_whitespace() {
-        // Mirrors Python `\s+` for the full `White_Space` codepoint set. These
-        // codepoints survive `to_match_form` (which only collapses ASCII
-        // U+0020), so a cross-cache caller can hand them off intact.
+    fn pub_strip_matches_python_re_whitespace() {
+        // Mirrors CPython's `\s` for str patterns: White_Space ∪ U+001C..=U+001F.
+        // NBSP folds away under NFKC inside `to_match_form` and never reaches
+        // here from that path, but the standalone helper takes pre-normalized
+        // input from other paths too — pin it here so the contract is explicit.
         assert_eq!(strip_leading_article("the\u{a0}beatles"), "beatles");
         assert_eq!(strip_leading_article("the\u{1680}beatles"), "beatles");
         assert_eq!(strip_leading_article("the\u{2028}beatles"), "beatles");
         assert_eq!(strip_leading_article("the\u{2029}beatles"), "beatles");
+        // The four ASCII info separators are CPython's historical `\s` quirk.
+        assert_eq!(strip_leading_article("the\u{1c}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{1d}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{1e}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{1f}beatles"), "beatles");
+    }
+
+    #[test]
+    fn pub_strip_consumes_mixed_whitespace_run() {
+        // `\s+` greediness across heterogeneous codepoints.
+        assert_eq!(
+            strip_leading_article("the \u{a0}\t\u{1680}beatles"),
+            "beatles"
+        );
     }
 
     #[test]

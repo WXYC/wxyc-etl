@@ -131,11 +131,18 @@ def test_with_disambiguator_strip(input_str: str, expected: str) -> None:
         ("stereolab", "stereolab"),
         ("the the", "the"),
         ("the  beatles", "beatles"),
-        # Unicode whitespace after the article — matches Python `\s+` semantics.
+        # Unicode whitespace after the article — matches CPython `re` `\s`.
         ("the beatles", "beatles"),
         ("the beatles", "beatles"),
         ("the beatles", "beatles"),
         ("the beatles", "beatles"),
+        # ASCII info separators are part of CPython's historical `\s` set.
+        ("thebeatles", "beatles"),
+        ("thebeatles", "beatles"),
+        ("thebeatles", "beatles"),
+        ("thebeatles", "beatles"),
+        # Heterogeneous whitespace run consumed greedily.
+        ("the  \t beatles", "beatles"),
         # Input contract: lowercased + trimmed. Uppercased articles are a no-op.
         ("The Beatles", "The Beatles"),
         ("", ""),

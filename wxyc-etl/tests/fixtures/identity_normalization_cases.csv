@@ -164,6 +164,8 @@ the beatles,beatles,article,leading-article-strip,NBSP after article (U+00A0)
 the beatles,beatles,article,leading-article-strip,OGHAM SPACE after article (U+1680)
 the beatles,beatles,article,leading-article-strip,LINE SEPARATOR after article (U+2028)
 the beatles,beatles,article,leading-article-strip,PARAGRAPH SEPARATOR after article (U+2029)
+thebeatles,beatles,article,leading-article-strip,FILE SEPARATOR after article (U+001C — CPython \s quirk)
+the   beatles,beatles,article,leading-article-strip,mixed-codepoint whitespace run
 
 # ===== punct (50) — to_identity_match_form_with_punctuation =====
 M.I.A.,m i a,punct,punct,classic dotted abbreviation
