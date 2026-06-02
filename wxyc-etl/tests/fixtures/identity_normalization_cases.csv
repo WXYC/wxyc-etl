@@ -141,6 +141,26 @@ Andy Human and the Reptoids,andy human and the reptoids,base,leading-article,art
 Aphex Twin,aphex twin,base,leading-article,no article negative
 "Stereolab, The",stereolab,base,leading-article,Discogs comma form
 
+# ===== leading-article-strip (10+) — wxyc_etl.text.strip_leading_article =====
+# Public PyO3-exposed helper (e3-normalization#133). Inputs are already
+# lowercased + trimmed by the caller; this variant exercises the standalone
+# article stripper, not the full to_identity_match_form pipeline. Diverges
+# from drop_articles on bare-article inputs: `the` → `""` here, `to_identity_match_form("The")` → `"the"`.
+the beatles,beatles,article,leading-article-strip,
+a tribe called quest,tribe called quest,article,leading-article-strip,
+an albatross,albatross,article,leading-article-strip,
+the microphones,microphones,article,leading-article-strip,
+the,,article,leading-article-strip,bare article EOS match
+a,,article,leading-article-strip,bare article EOS match
+an,,article,leading-article-strip,bare article EOS match
+theater,theater,article,leading-article-strip,prefix substring negative
+thee silver mt zion,thee silver mt zion,article,leading-article-strip,no word boundary after article
+animal,animal,article,leading-article-strip,prefix substring negative
+stereolab,stereolab,article,leading-article-strip,no article negative
+the the,the,article,leading-article-strip,only first article stripped
+the  beatles,beatles,article,leading-article-strip,multiple spaces collapsed
+juana molina,juana molina,article,leading-article-strip,canonical WXYC artist negative
+
 # ===== punct (50) — to_identity_match_form_with_punctuation =====
 M.I.A.,m i a,punct,punct,classic dotted abbreviation
 R.E.M.,r e m,punct,punct,

@@ -233,7 +233,7 @@ fn strip_trailing_parens(s: &str) -> &str {
 /// and end-of-string after it; `Beatles, The` matches but
 /// `Beatles, the Best Of` does not.
 fn drop_articles(s: &str) -> String {
-    if let Some(rest) = strip_leading_article(s) {
+    if let Some(rest) = strip_leading_article_with_space_suffix(s) {
         return rest.to_string();
     }
     if let Some(stem) = strip_trailing_comma_article(s) {
@@ -242,13 +242,80 @@ fn drop_articles(s: &str) -> String {
     s.to_string()
 }
 
-fn strip_leading_article(s: &str) -> Option<&str> {
+/// Internal helper used by [`drop_articles`]. Only matches the
+/// space-suffix form (`"the "`, `"a "`, `"an "`); a bare leading article
+/// (`"the"` with no trailing content) is preserved on purpose so that
+/// `to_identity_match_form("The")` returns `"the"` rather than `""`.
+///
+/// The public, broader [`strip_leading_article`] (used by Python callers via
+/// the PyO3 binding) does strip bare articles to the empty string. Keep these
+/// two helpers separate so a Python parity expectation cannot inadvertently
+/// retune the identity-match pipeline.
+fn strip_leading_article_with_space_suffix(s: &str) -> Option<&str> {
     for article in ["the ", "a ", "an "] {
         if let Some(rest) = s.strip_prefix(article) {
             return Some(rest);
         }
     }
     None
+}
+
+/// Strip a leading article (`the`, `a`, `an`) from a lowercased + trimmed
+/// string. Returns the input unchanged when there is no leading article.
+///
+/// The article must be followed by ASCII whitespace OR end-of-string. This
+/// mirrors the Python `^(the|a|an)(\s+|$)` regex used by
+/// `library-metadata-lookup`'s reconciler and FTS5 prefix-lookup paths so the
+/// cross-cache identity layer and the Python consumers see byte-identical
+/// outputs (E3 normalization charter; epic [WXYC/wxyc-etl#73]).
+///
+/// Trailing whitespace after the article is consumed in full
+/// (e.g. `"the  beatles"` → `"beatles"`), matching `\s+` greediness. Only the
+/// first matching article is stripped; `"the the"` → `"the"`.
+///
+/// # Contract
+///
+/// - Input is assumed lowercased and trimmed (matches `to_match_form` output
+///   or `str.lower()` on a pre-trimmed user-typed name). Casing is **not**
+///   normalized inside; uppercased articles like `"The"` are a no-op.
+/// - The article list is intentionally English-only. Plan §3.3.2 reserves
+///   Romance-language articles (`le`, `la`, `los`, `las`) for a future
+///   extension; when those land here, every consumer of the PyO3 binding
+///   inherits them automatically.
+///
+/// # Relationship to `to_identity_match_form`
+///
+/// This function is the standalone, public counterpart to the step-5 logic
+/// inside [`to_identity_match_form`]. It is **strictly more aggressive** for
+/// bare-article inputs: `strip_leading_article("the")` → `""`, whereas
+/// `to_identity_match_form("The")` → `"the"`. The latter deliberately
+/// preserves bare articles to keep the identity-match fallback ladder from
+/// collapsing a stem to empty.
+///
+/// # Examples
+///
+/// ```
+/// use wxyc_etl::text::strip_leading_article;
+///
+/// assert_eq!(strip_leading_article("the beatles"), "beatles");
+/// assert_eq!(strip_leading_article("a tribe called quest"), "tribe called quest");
+/// assert_eq!(strip_leading_article("an albatross"), "albatross");
+/// assert_eq!(strip_leading_article("the"), "");
+/// assert_eq!(strip_leading_article("theater"), "theater");
+/// assert_eq!(strip_leading_article("stereolab"), "stereolab");
+/// ```
+pub fn strip_leading_article(s: &str) -> &str {
+    for article in ["the", "a", "an"] {
+        if let Some(rest) = s.strip_prefix(article) {
+            if rest.is_empty() {
+                return rest;
+            }
+            if rest.starts_with(|c: char| c.is_ascii_whitespace()) {
+                return rest.trim_start_matches(|c: char| c.is_ascii_whitespace());
+            }
+        }
+    }
+    s
 }
 
 fn strip_trailing_comma_article(s: &str) -> Option<&str> {
@@ -395,6 +462,95 @@ mod tests {
             to_identity_match_form("The Foo Fighters (1995)"),
             "foo fighters"
         );
+    }
+
+    // --- public strip_leading_article (PyO3-exposed; e3-normalization#133) ---
+
+    #[test]
+    fn pub_strip_drops_the_prefix() {
+        assert_eq!(strip_leading_article("the beatles"), "beatles");
+    }
+
+    #[test]
+    fn pub_strip_drops_a_prefix() {
+        assert_eq!(
+            strip_leading_article("a tribe called quest"),
+            "tribe called quest"
+        );
+    }
+
+    #[test]
+    fn pub_strip_drops_an_prefix() {
+        assert_eq!(strip_leading_article("an albatross"), "albatross");
+    }
+
+    #[test]
+    fn pub_strip_drops_bare_the_to_empty() {
+        // Bare article (EOS match) — diverges from drop_articles, which preserves
+        // bare articles in identity-matching context.
+        assert_eq!(strip_leading_article("the"), "");
+    }
+
+    #[test]
+    fn pub_strip_drops_bare_a_to_empty() {
+        assert_eq!(strip_leading_article("a"), "");
+    }
+
+    #[test]
+    fn pub_strip_drops_bare_an_to_empty() {
+        assert_eq!(strip_leading_article("an"), "");
+    }
+
+    #[test]
+    fn pub_strip_no_op_on_prefix_substring() {
+        // No word boundary after the article.
+        assert_eq!(strip_leading_article("theater"), "theater");
+        assert_eq!(
+            strip_leading_article("thee silver mt zion"),
+            "thee silver mt zion"
+        );
+        assert_eq!(strip_leading_article("animal"), "animal");
+        assert_eq!(strip_leading_article("apple"), "apple");
+    }
+
+    #[test]
+    fn pub_strip_no_op_on_no_article() {
+        assert_eq!(strip_leading_article("stereolab"), "stereolab");
+        assert_eq!(strip_leading_article("juana molina"), "juana molina");
+    }
+
+    #[test]
+    fn pub_strip_no_op_on_empty() {
+        assert_eq!(strip_leading_article(""), "");
+    }
+
+    #[test]
+    fn pub_strip_consumes_multiple_spaces_after_article() {
+        // Matches Python `\s+` semantics — consume all ASCII whitespace after
+        // the article boundary.
+        assert_eq!(strip_leading_article("the  beatles"), "beatles");
+        assert_eq!(strip_leading_article("a\ttribe"), "tribe");
+    }
+
+    #[test]
+    fn pub_strip_consumes_only_first_article() {
+        // `the the` → strip one leading `the ` → `the`.
+        assert_eq!(strip_leading_article("the the"), "the");
+    }
+
+    #[test]
+    fn pub_strip_idempotent_after_one_strip() {
+        // Two calls: first strips, second is a no-op (since "beatles" has no article).
+        let once = strip_leading_article("the beatles");
+        let twice = strip_leading_article(once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn pub_strip_preserves_input_when_not_lowercased() {
+        // Documented Python contract: input is assumed lowercased + trimmed.
+        // The helper does not normalize; an uppercased article is a no-op.
+        assert_eq!(strip_leading_article("The Beatles"), "The Beatles");
     }
 
     // --- inherited from to_match_form: sigma + diacritics ---
