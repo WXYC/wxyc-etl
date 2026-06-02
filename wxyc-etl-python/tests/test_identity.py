@@ -111,3 +111,35 @@ def test_with_punctuation(input_str: str, expected: str) -> None:
 )
 def test_with_disambiguator_strip(input_str: str, expected: str) -> None:
     assert text.to_identity_match_form_with_disambiguator_strip(input_str) == expected
+
+
+# --- standalone article stripper (PyO3-exposed; wxyc-etl#133) ---
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        ("the beatles", "beatles"),
+        ("a tribe called quest", "tribe called quest"),
+        ("an albatross", "albatross"),
+        ("the", ""),
+        ("a", ""),
+        ("an", ""),
+        ("theater", "theater"),
+        ("thee silver mt zion", "thee silver mt zion"),
+        ("animal", "animal"),
+        ("stereolab", "stereolab"),
+        ("the the", "the"),
+        ("the  beatles", "beatles"),
+        # Unicode whitespace after the article — matches Python `\s+` semantics.
+        ("the beatles", "beatles"),
+        ("the beatles", "beatles"),
+        ("the beatles", "beatles"),
+        ("the beatles", "beatles"),
+        # Input contract: lowercased + trimmed. Uppercased articles are a no-op.
+        ("The Beatles", "The Beatles"),
+        ("", ""),
+    ],
+)
+def test_strip_leading_article(input_str: str, expected: str) -> None:
+    assert text.strip_leading_article(input_str) == expected

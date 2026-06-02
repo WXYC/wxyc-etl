@@ -263,15 +263,24 @@ fn strip_leading_article_with_space_suffix(s: &str) -> Option<&str> {
 /// Strip a leading article (`the`, `a`, `an`) from a lowercased + trimmed
 /// string. Returns the input unchanged when there is no leading article.
 ///
-/// The article must be followed by ASCII whitespace OR end-of-string. This
-/// mirrors the Python `^(the|a|an)(\s+|$)` regex used by
+/// The article must be followed by Unicode whitespace OR end-of-string,
+/// matching the Python `^(the|a|an)(\s+|$)` regex used by
 /// `library-metadata-lookup`'s reconciler and FTS5 prefix-lookup paths so the
-/// cross-cache identity layer and the Python consumers see byte-identical
-/// outputs (E3 normalization charter; epic [WXYC/wxyc-etl#73]).
+/// cross-cache identity layer and the Python consumers produce byte-identical
+/// outputs (E3 normalization charter; epic [WXYC/wxyc-etl#73]). "Unicode
+/// whitespace" here means [`char::is_whitespace`], which matches the same
+/// `White_Space` property that Python 3's default `\s` matches — i.e. ASCII
+/// space, TAB, NBSP (U+00A0), OGHAM SPACE (U+1680), LINE / PARAGRAPH
+/// SEPARATOR (U+2028 / U+2029), and the other [`Pattern_White_Space`][zs]
+/// codepoints. Step 7 of `to_match_form` preserves non-ASCII whitespace, so
+/// these codepoints can appear in real artist names (e.g. pasted from
+/// Wikipedia) and must round-trip the same on both sides.
 ///
 /// Trailing whitespace after the article is consumed in full
 /// (e.g. `"the  beatles"` → `"beatles"`), matching `\s+` greediness. Only the
 /// first matching article is stripped; `"the the"` → `"the"`.
+///
+/// [zs]: https://www.unicode.org/Public/UCD/latest/ucd/PropList.txt
 ///
 /// # Contract
 ///
@@ -310,8 +319,8 @@ pub fn strip_leading_article(s: &str) -> &str {
             if rest.is_empty() {
                 return rest;
             }
-            if rest.starts_with(|c: char| c.is_ascii_whitespace()) {
-                return rest.trim_start_matches(|c: char| c.is_ascii_whitespace());
+            if rest.starts_with(|c: char| c.is_whitespace()) {
+                return rest.trim_start_matches(|c: char| c.is_whitespace());
             }
         }
     }
@@ -539,11 +548,14 @@ mod tests {
     }
 
     #[test]
-    fn pub_strip_idempotent_after_one_strip() {
-        // Two calls: first strips, second is a no-op (since "beatles" has no article).
-        let once = strip_leading_article("the beatles");
-        let twice = strip_leading_article(once);
-        assert_eq!(once, twice);
+    fn pub_strip_matches_unicode_whitespace() {
+        // Mirrors Python `\s+` for the full `White_Space` codepoint set. These
+        // codepoints survive `to_match_form` (which only collapses ASCII
+        // U+0020), so a cross-cache caller can hand them off intact.
+        assert_eq!(strip_leading_article("the\u{a0}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{1680}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{2028}beatles"), "beatles");
+        assert_eq!(strip_leading_article("the\u{2029}beatles"), "beatles");
     }
 
     #[test]
