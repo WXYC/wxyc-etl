@@ -24,6 +24,7 @@ _FORMS = [
     text.to_identity_match_form_title,
     text.to_identity_match_form_with_punctuation,
     text.to_identity_match_form_with_disambiguator_strip,
+    text.strip_leading_article,
 ]
 _IDS = [
     "to_storage_form",
@@ -33,6 +34,7 @@ _IDS = [
     "to_identity_match_form_title",
     "to_identity_match_form_with_punctuation",
     "to_identity_match_form_with_disambiguator_strip",
+    "strip_leading_article",
 ]
 
 
