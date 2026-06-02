@@ -158,7 +158,7 @@ thee silver mt zion,thee silver mt zion,article,leading-article-strip,no word bo
 animal,animal,article,leading-article-strip,prefix substring negative
 stereolab,stereolab,article,leading-article-strip,no article negative
 the the,the,article,leading-article-strip,only first article stripped
-the  beatles,beatles,article,leading-article-strip,multiple spaces collapsed
+the  beatles,beatles,article,leading-article-strip,whitespace run after article consumed in full
 juana molina,juana molina,article,leading-article-strip,canonical WXYC artist negative
 the beatles,beatles,article,leading-article-strip,NBSP after article (U+00A0)
 the beatles,beatles,article,leading-article-strip,OGHAM SPACE after article (U+1680)

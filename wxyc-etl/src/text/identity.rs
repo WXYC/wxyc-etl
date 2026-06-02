@@ -540,8 +540,6 @@ mod tests {
 
     #[test]
     fn pub_strip_consumes_multiple_spaces_after_article() {
-        // Matches Python `\s+` semantics — consume all ASCII whitespace after
-        // the article boundary.
         assert_eq!(strip_leading_article("the  beatles"), "beatles");
         assert_eq!(strip_leading_article("a\ttribe"), "tribe");
     }
