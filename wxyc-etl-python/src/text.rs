@@ -16,6 +16,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_ascii_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_identity_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(to_identity_match_form_title, m)?)?;
+    m.add_function(wrap_pyfunction!(strip_leading_article, m)?)?;
     m.add_function(wrap_pyfunction!(
         to_identity_match_form_with_punctuation,
         m
@@ -149,6 +150,24 @@ fn to_identity_match_form(s: Option<&str>) -> String {
 fn to_identity_match_form_title(s: Option<&str>) -> String {
     s.map(wxyc_etl::text::to_identity_match_form_title)
         .unwrap_or_default()
+}
+
+/// Strip a leading article (`the`, `a`, `an`) from a lowercased + trimmed
+/// string. Returns the input unchanged when there is no leading article.
+///
+/// The article must be followed by ASCII whitespace OR end-of-string,
+/// mirroring the `^(the|a|an)(\s+|$)` regex used historically by
+/// `library-metadata-lookup`. Bare-article inputs reduce to `""`
+/// (`strip_leading_article("the") == ""`); inputs without a word boundary
+/// after a candidate article are preserved verbatim
+/// (`strip_leading_article("theater") == "theater"`).
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL.
+#[pyfunction]
+fn strip_leading_article(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::strip_leading_article)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// `to_identity_match_form` + plan §3.3.2 step 6: collapse runs of

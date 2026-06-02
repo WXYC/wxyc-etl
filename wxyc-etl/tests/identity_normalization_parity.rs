@@ -8,7 +8,7 @@
 //!
 //! Format:
 //!   input,expected,variant,category,notes
-//!   variant ∈ {base, title, punct, disamb}
+//!   variant ∈ {base, title, punct, disamb, article}
 //!
 //! Lines starting with `#` are comments. Empty lines are skipped. Quoted
 //! fields use the same minimal CSV convention as the WX-1 charset-torture
@@ -24,7 +24,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use wxyc_etl::text::{
-    to_identity_match_form, to_identity_match_form_title,
+    strip_leading_article, to_identity_match_form, to_identity_match_form_title,
     to_identity_match_form_with_disambiguator_strip, to_identity_match_form_with_punctuation,
 };
 
@@ -114,6 +114,7 @@ fn apply(variant: &str, input: &str) -> String {
         "title" => to_identity_match_form_title(input),
         "punct" => to_identity_match_form_with_punctuation(input),
         "disamb" => to_identity_match_form_with_disambiguator_strip(input),
+        "article" => strip_leading_article(input).to_string(),
         other => panic!("unknown variant {other:?}"),
     }
 }
@@ -158,6 +159,7 @@ fn fixture_meets_categorical_coverage_minimums() {
         ("trailing-parens-artist", 50),
         ("trailing-parens-title", 50),
         ("leading-article", 25),
+        ("leading-article-strip", 10),
         ("punct", 50),
         ("disamb", 50),
         ("disamb-title-negative", 25),
