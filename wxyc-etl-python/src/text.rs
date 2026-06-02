@@ -155,11 +155,12 @@ fn to_identity_match_form_title(s: Option<&str>) -> String {
 /// Strip a leading article (`the`, `a`, `an`) from a lowercased + trimmed
 /// string. Returns the input unchanged when there is no leading article.
 ///
-/// The article must be followed by Unicode whitespace OR end-of-string,
-/// matching the `^(the|a|an)(\s+|$)` regex used by `library-metadata-lookup`.
-/// Bare-article inputs reduce to `""` (`strip_leading_article("the") == ""`);
-/// inputs without a word boundary after a candidate article are preserved
-/// verbatim (`strip_leading_article("theater") == "theater"`).
+/// The article must be followed by whitespace OR end-of-string, byte-for-byte
+/// matching CPython's `^(the|a|an)(\s+|$)` regex (`\s` = Unicode `White_Space`
+/// ∪ ASCII info separators U+001C..=U+001F). Bare-article inputs reduce to
+/// `""` (`strip_leading_article("the") == ""`); inputs without a word
+/// boundary after a candidate article are preserved verbatim
+/// (`strip_leading_article("theater") == "theater"`).
 ///
 /// Accepts None (returns "") so Python callers don't need to guard NULL.
 #[pyfunction]
