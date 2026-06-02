@@ -172,6 +172,13 @@ fn postgres_parity_matches_rust_for_every_fixture_row() {
 
     let mut failures: Vec<String> = Vec::new();
     for row in &rows {
+        // The `article` variant exercises the standalone `strip_leading_article`
+        // helper exposed to Python via PyO3. It has no SQL counterpart by design
+        // — PG-side article stripping happens inside `wxyc_identity_match_artist`
+        // (step 5), not as a standalone function — so skip those rows here.
+        if row.variant == "article" {
+            continue;
+        }
         // Sanity: the committed expected matches the Rust function output.
         // (Already covered by identity_normalization_parity, but cheap to repeat
         // here so PG failures are not confused with Rust drift.)
