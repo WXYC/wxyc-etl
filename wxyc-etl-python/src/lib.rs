@@ -4,6 +4,7 @@ use pyo3::types::PyModuleMethods;
 mod fuzzy;
 mod import_utils;
 mod parser;
+mod pg;
 mod schema;
 mod state;
 mod text;
@@ -32,6 +33,7 @@ fn register_submodule(
 fn _native(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_submodule(py, m, "text", text::register)?;
     register_submodule(py, m, "parser", parser::register)?;
+    register_submodule(py, m, "pg", pg::register)?;
     register_submodule(py, m, "state", state::register)?;
     register_submodule(py, m, "import_utils", import_utils::register)?;
     register_submodule(py, m, "schema", schema::register)?;
