@@ -6,6 +6,7 @@ def test_import_wxyc_etl():
 
     assert hasattr(wxyc_etl, "text")
     assert hasattr(wxyc_etl, "parser")
+    assert hasattr(wxyc_etl, "pg")
     assert hasattr(wxyc_etl, "state")
     assert hasattr(wxyc_etl, "import_utils")
     assert hasattr(wxyc_etl, "schema")
@@ -29,6 +30,13 @@ def test_parser_submodule_functions():
     assert callable(parser.load_table_rows)
     assert callable(parser.iter_table_rows)
     assert callable(parser.parse_sql_values)
+
+
+def test_pg_submodule_functions():
+    from wxyc_etl import pg
+
+    assert callable(pg.to_pg_text_form)
+    assert callable(pg.batch_to_pg_text_form)
 
 
 def test_state_submodule_class():
