@@ -1,9 +1,9 @@
 //! Regression report for the cross-cache-identity layered normalizer.
 //!
 //! Spec: plan §3.3.4 (regression-report required artifact). Baselines
-//! `to_identity_match_form` and the opt-in variants against `to_match_form`
-//! (NOT the legacy `normalize_artist_name` — that delta is already captured
-//! in WX-2.3 per-repo migration).
+//! `to_identity_match_form` and the opt-in variants against `to_match_form`;
+//! the delta against the pre-WX-2 normalizer was already captured in WX-2.3
+//! per-repo migration.
 //!
 //! ## Output
 //!

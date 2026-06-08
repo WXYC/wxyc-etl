@@ -1,14 +1,10 @@
 //! HashSet-based artist and title filtering.
-//!
-//! Internal callers of the legacy `normalize_artist_name` / `normalize_title`
-//! pending M3 per-repo migration to the WX-2 charter forms (docs#16).
-#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use super::normalize::{normalize_artist_name, normalize_title};
+use super::forms::to_match_form;
 
 /// Title filter backed by a normalized HashSet.
 ///
@@ -27,7 +23,7 @@ impl TitleFilter {
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty())
-            .map(normalize_title)
+            .map(to_match_form)
             .collect();
         Ok(TitleFilter { titles })
     }
@@ -37,7 +33,7 @@ impl TitleFilter {
     /// Tries exact match first, then strips trailing `[...]` suffixes
     /// (common in Discogs for catalog numbers and reissue notes).
     pub fn matches(&self, title: &str) -> bool {
-        let normalized = normalize_title(title);
+        let normalized = to_match_form(title);
         if self.titles.contains(&normalized) {
             return true;
         }
@@ -82,7 +78,7 @@ impl ArtistFilter {
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty())
-            .map(normalize_artist_name)
+            .map(to_match_form)
             .collect();
         Ok(ArtistFilter {
             artists,
@@ -104,7 +100,7 @@ impl ArtistFilter {
             let artist_id: u64 = record[0].parse().unwrap_or(0);
             let alias_name = &record[2]; // alias_name column
 
-            let normalized = normalize_artist_name(alias_name);
+            let normalized = to_match_form(alias_name);
             if !normalized.is_empty() {
                 self.aliases.entry(artist_id).or_default().push(normalized);
                 count += 1;
@@ -121,7 +117,7 @@ impl ArtistFilter {
     {
         names
             .into_iter()
-            .any(|name| self.artists.contains(&normalize_artist_name(name)))
+            .any(|name| self.artists.contains(&to_match_form(name)))
     }
 
     /// Check if any artist matches by canonical name or by alias lookup.
@@ -131,7 +127,7 @@ impl ArtistFilter {
     /// 2. Look up aliases by artist_id and check each against the library set
     pub fn matches_any_with_ids(&self, artists: &[(u64, &str)]) -> bool {
         for (artist_id, name) in artists {
-            if self.artists.contains(&normalize_artist_name(name)) {
+            if self.artists.contains(&to_match_form(name)) {
                 return true;
             }
             if let Some(alias_names) = self.aliases.get(artist_id) {

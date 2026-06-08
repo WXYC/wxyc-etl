@@ -1,23 +1,18 @@
 //! WX-1.2.7 detector for the text-normalization layer.
 //!
 //! Drives the cross-repo `@wxyc/shared` charset-torture corpus through
-//! `wxyc_etl::text::normalize_artist_name` and compares the output against
-//! the corpus's `expected_match_form`. Failures known to require WX-2
-//! normalizer work are recorded in `EXPECTED_FAILURES` with a stable
+//! `wxyc_etl::text::to_match_form` and compares the output against
+//! the corpus's `expected_match_form`. Failures known to require future
+//! charter work are recorded in `expected_failures()` with a stable
 //! `[etl:<reason>]` tag (the cross-reference key WX-3 / WX-2 auditors use).
 //!
 //! Two failure shapes both fail the test:
 //!  - Unexpected failure: an entry mismatched its expected form and is not in
-//!    EXPECTED_FAILURES. A genuine new bug or a corpus drift.
-//!  - Unexpected pass: an entry in EXPECTED_FAILURES now matches. A fix
+//!    `expected_failures()`. A genuine new bug or a corpus drift.
+//!  - Unexpected pass: an entry in `expected_failures()` now matches. A fix
 //!    landed without updating the map; remove the entry.
 //!
 //! See WXYC/docs#15 for the WX-1 plan.
-//!
-//! Exercises the legacy `normalize_artist_name` on purpose; the deprecation
-//! warning is silenced for the file. The legacy detector retires when M3
-//! per-repo migration replaces it with the WX-2 charter forms (docs#16).
-#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -45,48 +40,15 @@ fn load_corpus() -> Corpus {
     serde_json::from_slice(&bytes).expect("corpus is valid JSON")
 }
 
-/// Inputs whose `normalize_artist_name(input) != expected_match_form` today.
+/// Inputs whose `to_match_form(input) != expected_match_form` today.
 /// Each value is the WX-1 plan tag explaining why; tags are searchable so
 /// WX-2/WX-3 auditors can convert them to fixed boundaries.
+///
+/// Empty since `to_match_form` covers every charter-form entry in the corpus
+/// (the 9 prior `[etl:no-storage-form]` / `[etl:no-match-form]` entries
+/// retired in WX-4.1.1 when the detector swapped off the legacy normalizer).
 fn expected_failures() -> HashMap<&'static str, &'static str> {
-    let mut m = HashMap::new();
-    // mojibake_known: requires WX-2 `to_storage_form` repair before normalization.
-    m.insert(
-        "Î£tella",
-        "[etl:no-storage-form] needs WX-2 repair: Î£ -> Σ before normalize",
-    );
-    m.insert("Ã©", "[etl:no-storage-form] needs WX-2 repair: Ã© -> é");
-    m.insert("Ã±", "[etl:no-storage-form] needs WX-2 repair: Ã± -> ñ");
-    m.insert("Ã¶", "[etl:no-storage-form] needs WX-2 repair: Ã¶ -> ö");
-    m.insert("Ã¼", "[etl:no-storage-form] needs WX-2 repair: Ã¼ -> ü");
-    m.insert("â€™", "[etl:no-storage-form] needs WX-2 repair: â€™ -> ’");
-    // Cyrillic Ё (U+0401) NFKD-decomposes to Е + combining diaeresis; the
-    // diaeresis-stripping pass collapses it to "е", losing the dot. The corpus
-    // expects "ё" preserved. WX-2 normalizer charter has to decide whether
-    // script-essential marks survive — Ё, Й, etc. behave differently from
-    // Latin é, ñ which are diacritic-as-decoration.
-    m.insert(
-        "Ё",
-        "[etl:no-match-form] WX-2 charter must preserve Cyrillic Ё diaeresis",
-    );
-    // bidi_marks: Cf format chars (LRM/RLM/RLO/PDF) survive NFKD + is_mark
-    // filter because they are category Cf, not M. The WX-2 charter strips
-    // all Cf in match-form except U+200D (ZWJ). normalize_artist_name does
-    // not yet implement that strip — it will when M2.2.5 deprecates the
-    // legacy normalizer in favor of to_match_form.
-    m.insert(
-        "Hello\u{200E}World",
-        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
-    );
-    m.insert(
-        "Hello\u{200F}World",
-        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
-    );
-    m.insert(
-        "\u{202E}Reversed\u{202C}",
-        "[etl:no-match-form] WX-2 strips Cf in to_match_form (not yet wired into normalize_artist_name)",
-    );
-    m
+    HashMap::new()
 }
 
 #[test]
@@ -103,7 +65,7 @@ fn corpus_match_form_compliance() {
             let Some(expected) = entry.expected_match_form.as_deref() else {
                 continue;
             };
-            let actual = wxyc_etl::text::normalize_artist_name(&entry.input);
+            let actual = wxyc_etl::text::to_match_form(&entry.input);
             let known = known_failures.get(entry.input.as_str()).copied();
 
             match (actual == expected, known) {

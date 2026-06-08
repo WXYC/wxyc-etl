@@ -2,14 +2,10 @@
 //!
 //! Ports `discogs-cache/lib/artist_splitting.py` to Rust.
 //! Splits combined multi-artist library entries into individual components.
-//!
-//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
-//! migration to the WX-2 charter forms (docs#16).
-#![allow(deprecated)]
 
 use std::collections::HashSet;
 
-use super::normalize::normalize_artist_name;
+use super::forms::to_match_form;
 
 /// Split a combined artist name into individual components.
 ///
@@ -94,7 +90,7 @@ fn try_ampersand_split(name: &str, known_artists: &HashSet<String>) -> Option<Ve
     // Check if any component is a known artist
     let any_known = parts
         .iter()
-        .any(|p| known_artists.contains(&normalize_artist_name(p)));
+        .any(|p| known_artists.contains(&to_match_form(p)));
 
     if !any_known {
         return None;

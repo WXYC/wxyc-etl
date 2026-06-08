@@ -13,14 +13,10 @@
 //! in the REVIEW band, the other two scorers can't change the answer), this
 //! turns Phase 4 of `verify_cache.py` from hours into minutes on a
 //! large library.
-//!
-//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
-//! migration to the WX-2 charter forms (docs#16).
-#![allow(deprecated)]
 
 use std::collections::{HashMap, HashSet};
 
-use crate::text::normalize_artist_name;
+use crate::text::to_match_form;
 
 fn tokens_lower(s: &str) -> Vec<String> {
     s.split_whitespace()
@@ -63,8 +59,9 @@ pub struct LibraryIndex {
 impl LibraryIndex {
     /// Build an index from (artist, title) pairs.
     ///
-    /// All strings are normalized via `normalize_artist_name` (which also
-    /// works for titles — same NFKD + lowercase + trim logic).
+    /// All strings are normalized via `to_match_form` (which works for both
+    /// artists and titles — same NFKC + lowercase + selective combining-strip
+    /// + fold pipeline).
     pub fn from_pairs(pairs: &[(String, String)]) -> Self {
         let mut exact_pairs = HashSet::with_capacity(pairs.len());
         let mut artist_to_titles: HashMap<String, Vec<String>> = HashMap::new();
@@ -72,8 +69,8 @@ impl LibraryIndex {
         let mut artist_set = HashSet::new();
 
         for (artist, title) in pairs {
-            let norm_artist = normalize_artist_name(artist);
-            let norm_title = normalize_artist_name(title);
+            let norm_artist = to_match_form(artist);
+            let norm_title = to_match_form(title);
 
             exact_pairs.insert((norm_artist.clone(), norm_title.clone()));
             artist_to_titles

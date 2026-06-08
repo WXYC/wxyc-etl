@@ -13,38 +13,34 @@ from wxyc_etl import text
 # Performance tests require release build; mark so they can be skipped in CI debug
 perf = pytest.mark.perf
 
-# Exercises the legacy batch_normalize binding on purpose; its DeprecationWarning
-# signal is verified by test_deprecations.py.
-pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
-
 
 @perf
-def test_batch_normalize_performance():
+def test_batch_to_match_form_performance():
     """100K normalizations should complete in under 200ms (release build)."""
     names = ["Nilüfer Yanya"] * 100_000
     start = time.time()
-    results = text.batch_normalize(names)
+    results = text.batch_to_match_form(names)
     elapsed = time.time() - start
-    assert elapsed < 0.2, f"batch_normalize took {elapsed:.3f}s for 100K names"
+    assert elapsed < 0.2, f"batch_to_match_form took {elapsed:.3f}s for 100K names"
     assert len(results) == 100_000
 
 
 @perf
-def test_normalize_individual_calls():
+def test_to_match_form_individual_calls():
     """100K individual normalize calls should complete in under 500ms."""
     start = time.time()
     for _ in range(100_000):
-        text.normalize_artist_name("Nilüfer Yanya")
+        text.to_match_form("Nilüfer Yanya")
     elapsed = time.time() - start
-    assert elapsed < 0.5, f"100K normalize calls took {elapsed:.3f}s"
+    assert elapsed < 0.5, f"100K to_match_form calls took {elapsed:.3f}s"
 
 
 @perf
-def test_batch_normalize_million():
+def test_batch_to_match_form_million():
     """1M normalizations via batch should complete in under 2s (release build)."""
     names = ["Csillagrablók"] * 1_000_000
     start = time.time()
-    results = text.batch_normalize(names)
+    results = text.batch_to_match_form(names)
     elapsed = time.time() - start
-    assert elapsed < 2.0, f"batch_normalize took {elapsed:.3f}s for 1M names"
+    assert elapsed < 2.0, f"batch_to_match_form took {elapsed:.3f}s for 1M names"
     assert len(results) == 1_000_000
