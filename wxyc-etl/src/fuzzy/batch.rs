@@ -2,17 +2,13 @@
 //!
 //! Array-in/array-out APIs suitable for PyO3 exposure, avoiding per-item
 //! Python/Rust boundary crossings.
-//!
-//! Internal caller of the legacy `normalize_artist_name` pending M3 per-repo
-//! migration to the WX-2 charter forms (docs#16).
-#![allow(deprecated)]
 
 use std::collections::HashSet;
 
 use rayon::prelude::*;
 
 use super::classify::{classify_release, Classification, ClassifyConfig, LibraryIndex};
-use crate::text::normalize_artist_name;
+use crate::text::to_match_form;
 
 /// Classify N releases in parallel using rayon.
 ///
@@ -28,8 +24,8 @@ pub fn batch_classify_releases(
         .par_iter()
         .zip(titles.par_iter())
         .map(|(artist, title)| {
-            let norm_artist = normalize_artist_name(artist);
-            let norm_title = normalize_artist_name(title);
+            let norm_artist = to_match_form(artist);
+            let norm_title = to_match_form(title);
             classify_release(&norm_artist, &norm_title, library_index, config)
         })
         .collect()
@@ -42,7 +38,7 @@ pub fn batch_classify_releases(
 pub fn batch_filter_artists(artist_names: &[String], library_set: &HashSet<String>) -> Vec<bool> {
     artist_names
         .iter()
-        .map(|name| library_set.contains(&normalize_artist_name(name)))
+        .map(|name| library_set.contains(&to_match_form(name)))
         .collect()
 }
 

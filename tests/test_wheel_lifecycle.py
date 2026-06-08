@@ -123,8 +123,8 @@ import wxyc_etl
 check("import wxyc_etl", True)
 
 from wxyc_etl.text import (
-    normalize_artist_name, is_compilation_artist, split_artist_name,
-    split_artist_name_contextual, strip_diacritics, batch_normalize,
+    is_compilation_artist, split_artist_name, split_artist_name_contextual,
+    to_match_form, batch_to_match_form,
 )
 check("import wxyc_etl.text (all exports)", True)
 
@@ -154,11 +154,11 @@ check("import wxyc_etl.schema (all exports)", True)
 
 # -- text module --
 
-check("normalize_artist_name('Stereolab')",
-      normalize_artist_name("Stereolab"), "stereolab")
+check("to_match_form('Stereolab')",
+      to_match_form("Stereolab"), "stereolab")
 
-check("normalize_artist_name(None)",
-      normalize_artist_name(None), "")
+check("to_match_form(None)",
+      to_match_form(None), "")
 
 check("is_compilation_artist('Various Artists')",
       is_compilation_artist("Various Artists"), True)
@@ -166,11 +166,8 @@ check("is_compilation_artist('Various Artists')",
 check("is_compilation_artist('Juana Molina')",
       is_compilation_artist("Juana Molina"), False)
 
-check("strip_diacritics('Bjork')",
-      strip_diacritics("Bjork"), "Bjork")
-
-check("batch_normalize(['Cat Power', 'Sessa'])",
-      batch_normalize(["Cat Power", "Sessa"]), ["cat power", "sessa"])
+check("batch_to_match_form(['Cat Power', 'Sessa'])",
+      batch_to_match_form(["Cat Power", "Sessa"]), ["cat power", "sessa"])
 
 check("split_artist_name no split without context",
       split_artist_name("Duke Ellington & John Coltrane"), None)

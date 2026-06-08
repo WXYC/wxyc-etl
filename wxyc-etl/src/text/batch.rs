@@ -5,18 +5,6 @@
 
 use super::filter::ArtistFilter;
 use super::forms::{to_ascii_form, to_match_form, to_storage_form};
-#[allow(deprecated)]
-use super::normalize::normalize_artist_name;
-
-/// Normalize a batch of artist names in one call.
-#[deprecated(
-    since = "0.2.0",
-    note = "use wxyc_etl::text::batch_to_match_form (or batch_to_storage_form / batch_to_ascii_form) — see plans/mojibake-prevention/2-normalizer-charter.md"
-)]
-pub fn batch_normalize(names: &[String]) -> Vec<String> {
-    #[allow(deprecated)]
-    names.iter().map(|n| normalize_artist_name(n)).collect()
-}
 
 /// Apply [`to_storage_form`] to each input in one call.
 pub fn batch_to_storage_form(inputs: &[String]) -> Vec<String> {
@@ -45,29 +33,9 @@ pub fn batch_filter(names: &[String], filter: &ArtistFilter) -> Vec<bool> {
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn test_batch_normalize_basic() {
-        let names = vec![
-            "Nilüfer Yanya".into(),
-            "Stereolab".into(),
-            "Csillagrablók".into(),
-        ];
-        assert_eq!(
-            batch_normalize(&names),
-            vec!["nilufer yanya", "stereolab", "csillagrablok"]
-        );
-    }
-
-    #[test]
-    fn test_batch_normalize_empty() {
-        let names: Vec<String> = vec![];
-        assert_eq!(batch_normalize(&names), Vec::<String>::new());
-    }
 
     #[test]
     fn test_batch_filter_matches() {

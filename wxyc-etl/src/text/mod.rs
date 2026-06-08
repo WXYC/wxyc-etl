@@ -4,8 +4,8 @@
 //!
 //! ```
 //! use wxyc_etl::text::{
-//!     normalize_artist_name, ArtistFilter, TitleFilter,
-//!     is_compilation_artist, split_artist_name, batch_normalize,
+//!     to_match_form, ArtistFilter, TitleFilter,
+//!     is_compilation_artist, split_artist_name, batch_to_match_form,
 //! };
 //! ```
 
@@ -16,7 +16,6 @@ pub mod folds;
 pub mod forms;
 pub mod identity;
 pub mod mojibake;
-pub mod normalize;
 pub mod split;
 
 // Convenience re-exports for the most common entry points.
@@ -30,11 +29,3 @@ pub use identity::{
 };
 pub use mojibake::fix_mojibake;
 pub use split::{split_artist_name, split_artist_name_contextual};
-
-// Deprecated re-exports — kept for back-compat until M3 per-repo migration retires
-// each consumer (docs#16). Re-exported through an `#[allow(deprecated)]` shim so the
-// module itself doesn't fire the warning on every build.
-#[allow(deprecated)]
-pub use batch::batch_normalize;
-#[allow(deprecated)]
-pub use normalize::{normalize_artist_name, normalize_title, strip_diacritics};

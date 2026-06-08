@@ -8,7 +8,7 @@ For the underlying three-entry-point contracts (`to_storage_form`, `to_match_for
 
 | Layer | State |
 |---|---|
-| WX-2 baseline (`to_storage_form` / `to_match_form` / `to_ascii_form`) | ✅ SHIPPED in `wxyc-etl` 0.2.x (commit `c2652b9`); legacy `normalize_artist_name` is `#[deprecated]` per WX-2.2.5 |
+| WX-2 baseline (`to_storage_form` / `to_match_form` / `to_ascii_form`) | ✅ SHIPPED in `wxyc-etl` 0.2.x (commit `c2652b9`); legacy `normalize_artist_name` / `strip_diacritics` / `normalize_title` / `batch_normalize` removed in 0.7.0 (WX-4.1.1) |
 | Audit of all consumer normalizers (plan [§3.3.1](https://github.com/WXYC/wiki/blob/main/plans/library-hook-canonicalization-plan.md#331-sequenced-workflow-with-explicit-decision-gates) step 1) | ✅ DONE in [`docs/normalization-audit.md`](./normalization-audit.md) (PR [#88](https://github.com/WXYC/wxyc-etl/pull/88), closed [#74](https://github.com/WXYC/wxyc-etl/issues/74)) |
 | Cross-cache-identity layer (this doc) | 🚧 SPEC — implementation not yet shipped |
 | Postgres analog | ⏳ FUTURE — see [Postgres analog](#postgres-analog-wxyc_identity_match_artist) |
@@ -113,7 +113,7 @@ Failing parity blocks the wxyc-etl 0.3.x release tag.
 Path: `wxyc-etl/tests/regression_report.rs`.
 Output: `regression-report.json` written to `wxyc-etl/target/regression-report.json` and uploaded to the PR as a CI artifact.
 
-**Baseline:** `to_match_form` (NOT the legacy `normalize_artist_name`). The shift attributable to going from the legacy normalizer to `to_match_form` is already accounted for in WX-2.3 per-repo migration; the identity report measures only the additional shift introduced by steps 4-6 + 8.
+**Baseline:** `to_match_form`. The shift attributable to going from the pre-WX-2 normalizer to `to_match_form` was accounted for in WX-2.3 per-repo migration; the identity report measures only the additional shift introduced by steps 4-6 + 8.
 
 **Sections** per plan [§3.3.4](https://github.com/WXYC/wiki/blob/main/plans/library-hook-canonicalization-plan.md#334-regression-report-required-artifact) (lettered subsections retained for cross-reference):
 
@@ -163,7 +163,7 @@ Per-cache + Backend ownership matrix (cribbed from plan [§3.3.5](https://github
 
 `to_identity_match_form` is a new public function. The plan's [§3.3.1](https://github.com/WXYC/wiki/blob/main/plans/library-hook-canonicalization-plan.md#331-sequenced-workflow-with-explicit-decision-gates) step 3 version-decision rule (bump if any of steps 4-6 + 8 ship) translates to: bump `wxyc-etl` from 0.2.x to **0.3.0** when this layer ships.
 
-The 0.3.0 release publishes the new function alongside everything 0.2.x ships; no breaking change to existing API surface. The legacy `normalize_artist_name` etc. remain `#[deprecated]` and slated for removal in a future major bump (per WX-2 M4.1.1).
+The 0.3.0 release published the new function alongside everything 0.2.x ships; no breaking change to existing API surface at that point. The legacy `normalize_artist_name` / `strip_diacritics` / `normalize_title` / `batch_normalize` were removed in 0.7.0 (per WX-4.1.1).
 
 ## Cross-references
 

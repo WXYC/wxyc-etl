@@ -8,8 +8,8 @@
 //! - `normalization` NFD entries (2 entries): bytes canonicalize to NFC.
 //! - everything else (~30 entries): storage form is a passthrough.
 //!
-//! Companion to `tests/charset_torture.rs` (which exercises the legacy
-//! `normalize_artist_name` path).
+//! Companion to `tests/charset_torture.rs` (which drives every corpus entry
+//! through `to_match_form` against `expected_match_form`).
 
 use std::collections::HashMap;
 use std::path::Path;

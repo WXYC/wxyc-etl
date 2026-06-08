@@ -2,10 +2,9 @@
 //!
 //! Drives every entry of the WX-1 charset-torture corpus that defines an
 //! `expected_match_form` through `wxyc_etl::text::to_match_form` and asserts
-//! the result equals it. Companion to `tests/forms_storage.rs` and the
-//! legacy `tests/charset_torture.rs` (which still exercises the
-//! pre-charter `normalize_artist_name` and carries `[etl:no-match-form]`
-//! xfails until M2.2.5 deprecates that path).
+//! the result equals it. Companion to `tests/forms_storage.rs` and
+//! `tests/charset_torture.rs` (which runs the same detector with strict-xfail
+//! bookkeeping for any future regressions).
 
 use std::collections::HashMap;
 use std::path::Path;

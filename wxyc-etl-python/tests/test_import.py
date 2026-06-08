@@ -14,9 +14,10 @@ def test_import_wxyc_etl():
 def test_text_submodule_functions():
     from wxyc_etl import text
 
-    assert callable(text.normalize_artist_name)
-    assert callable(text.strip_diacritics)
-    assert callable(text.batch_normalize)
+    assert callable(text.to_storage_form)
+    assert callable(text.to_match_form)
+    assert callable(text.to_ascii_form)
+    assert callable(text.batch_to_match_form)
     assert callable(text.is_compilation_artist)
     assert callable(text.split_artist_name)
     assert callable(text.split_artist_name_contextual)

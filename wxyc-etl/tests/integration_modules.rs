@@ -3,10 +3,6 @@
 //! These tests wire two or more modules together to verify cross-module
 //! contracts. Each module has its own unit tests; these integration tests
 //! exercise the boundaries between modules using realistic WXYC data.
-//!
-//! Exercises the legacy normalizer functions on purpose; the per-call
-//! deprecation warnings are silenced for the file.
-#![allow(deprecated)]
 
 use std::collections::HashSet;
 
@@ -18,7 +14,7 @@ use wxyc_etl::fuzzy::{
 use wxyc_etl::import::{ColumnMapping, ImportDedupSet};
 use wxyc_etl::pipeline::*;
 use wxyc_etl::state::{PipelineState, STEP_NAMES};
-use wxyc_etl::text::{batch_normalize, normalize_artist_name};
+use wxyc_etl::text::{batch_to_match_form, to_match_form};
 
 // ---------------------------------------------------------------------------
 // WXYC example data (from wxyc-shared canonical fixtures)
@@ -385,8 +381,8 @@ mod text_normalization_to_fuzzy {
         let config = ClassifyConfig::default();
 
         for (artist, title, _label) in wxyc_releases() {
-            let norm_artist = normalize_artist_name(artist);
-            let norm_title = normalize_artist_name(title);
+            let norm_artist = to_match_form(artist);
+            let norm_title = to_match_form(title);
             let result = classify_release(&norm_artist, &norm_title, &index, &config);
             assert_eq!(
                 result,
@@ -400,10 +396,10 @@ mod text_normalization_to_fuzzy {
         }
     }
 
-    /// batch_normalize followed by batch_classify_releases should produce
+    /// batch_to_match_form followed by batch_classify_releases should produce
     /// the same results as individual normalize + classify calls.
     #[test]
-    fn batch_normalize_then_batch_classify_consistency() {
+    fn batch_to_match_form_then_batch_classify_consistency() {
         let pairs = library_pairs();
         let index = LibraryIndex::from_pairs(&pairs);
         let config = ClassifyConfig::default();
@@ -418,8 +414,8 @@ mod text_normalization_to_fuzzy {
             .collect();
 
         // Batch path: normalize then classify
-        let norm_artists = batch_normalize(&artists);
-        let norm_titles = batch_normalize(&titles);
+        let norm_artists = batch_to_match_form(&artists);
+        let norm_titles = batch_to_match_form(&titles);
         let batch_results = batch_classify_releases(&norm_artists, &norm_titles, &index, &config);
 
         // Individual path
@@ -427,8 +423,8 @@ mod text_normalization_to_fuzzy {
             .iter()
             .zip(titles.iter())
             .map(|(a, t)| {
-                let na = normalize_artist_name(a);
-                let nt = normalize_artist_name(t);
+                let na = to_match_form(a);
+                let nt = to_match_form(t);
                 classify_release(&na, &nt, &index, &config)
             })
             .collect();
@@ -444,12 +440,12 @@ mod text_normalization_to_fuzzy {
             .iter()
             .map(|(a, _, _)| a.to_string())
             .collect();
-        let normalized = batch_normalize(&artists);
+        let normalized = batch_to_match_form(&artists);
 
         for (original, normed) in artists.iter().zip(normalized.iter()) {
             assert!(
                 !normed.is_empty(),
-                "normalize_artist_name({:?}) produced empty string",
+                "to_match_form({:?}) produced empty string",
                 original,
             );
         }
@@ -465,7 +461,7 @@ mod text_normalization_to_fuzzy {
             .collect();
 
         // Normalize each name, then resolve against the original catalog
-        let normalized: Vec<String> = catalog.iter().map(|a| normalize_artist_name(a)).collect();
+        let normalized: Vec<String> = catalog.iter().map(|a| to_match_form(a)).collect();
         let results = batch_fuzzy_resolve(&normalized, &catalog, 0.7, 2, 0.02);
 
         for (i, (result, original)) in results.iter().zip(catalog.iter()).enumerate() {
@@ -494,8 +490,8 @@ mod text_normalization_to_fuzzy {
         let config = ClassifyConfig::default();
 
         for (artist, title) in &test_cases {
-            let norm_artist = normalize_artist_name(artist);
-            let norm_title = normalize_artist_name(title);
+            let norm_artist = to_match_form(artist);
+            let norm_title = to_match_form(title);
             let result = classify_release(&norm_artist, &norm_title, &index, &config);
             assert_eq!(
                 result,
@@ -522,8 +518,8 @@ mod text_normalization_to_fuzzy {
         ];
 
         for (artist, title) in &non_library {
-            let norm_artist = normalize_artist_name(artist);
-            let norm_title = normalize_artist_name(title);
+            let norm_artist = to_match_form(artist);
+            let norm_title = to_match_form(title);
             let result = classify_release(&norm_artist, &norm_title, &index, &config);
             assert_ne!(
                 result,
@@ -1000,8 +996,8 @@ mod full_pipeline_e2e {
             rx,
             handle,
             |item: &(String, String, String)| {
-                let norm_artist = normalize_artist_name(&item.0);
-                let norm_title = normalize_artist_name(&item.1);
+                let norm_artist = to_match_form(&item.0);
+                let norm_title = to_match_form(&item.1);
                 Some((norm_artist, norm_title))
             },
             &mut output,
