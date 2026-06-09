@@ -10,21 +10,26 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Make `s` acceptable for storage in a PostgreSQL TEXT column.
 ///
 /// Strips U+0000 (NUL) bytes, which the SQL standard forbids in character
-/// types. Accepts None (returns "") so Python callers don't need to guard
-/// NULL values from DB columns or optional API fields.
+/// types. `None` passes through as `None` so callers writing through
+/// `COALESCE(EXCLUDED.col, table.col)` upserts (or psycopg's COPY `\N`
+/// sentinel) continue to skip absent fields rather than overwriting them
+/// with the empty string.
 ///
 /// See WX-3.B / WXYC/docs#18 for the strip-at-boundary policy.
 #[pyfunction]
-fn to_pg_text_form(s: Option<&str>) -> String {
+fn to_pg_text_form(s: Option<&str>) -> Option<String> {
     s.map(|s| wxyc_etl::pg::to_pg_text_form(s).into_owned())
-        .unwrap_or_default()
 }
 
 /// Apply [`to_pg_text_form`] to each input in one cross-FFI call.
+///
+/// Each element is treated independently: `None` entries pass through as
+/// `None`, `str` entries get the NUL strip. The output list is the same
+/// length as the input.
 #[pyfunction]
-fn batch_to_pg_text_form(items: Vec<String>) -> Vec<String> {
+fn batch_to_pg_text_form(items: Vec<Option<String>>) -> Vec<Option<String>> {
     items
-        .iter()
-        .map(|s| wxyc_etl::pg::to_pg_text_form(s).into_owned())
+        .into_iter()
+        .map(|opt| opt.map(|s| wxyc_etl::pg::to_pg_text_form(&s).into_owned()))
         .collect()
 }
