@@ -33,9 +33,11 @@ def test_to_pg_text_form(input_str, expected):
     assert pg.to_pg_text_form(input_str) == expected
 
 
-def test_to_pg_text_form_accepts_none():
-    """Mirrors the charter-form Option<&str> -> "" contract."""
-    assert pg.to_pg_text_form(None) == ""
+def test_to_pg_text_form_preserves_none():
+    """Option<&str> -> Option<String>: None passes through unchanged so
+    COALESCE-based upserts in consumer repos continue to skip absent
+    fields rather than overwriting them with the empty string."""
+    assert pg.to_pg_text_form(None) is None
 
 
 def test_to_pg_text_form_idempotent():
@@ -52,8 +54,21 @@ def test_batch_to_pg_text_form_matches_singles():
     assert pg.batch_to_pg_text_form(inputs) == expected
 
 
+def test_batch_to_pg_text_form_preserves_none():
+    """Per-element None passes through unchanged, mirroring the singular
+    contract: callers can pass a heterogeneous list of `str | None` and
+    rely on positional None pass-through for downstream COALESCE writes."""
+    inputs = ["Stereolab", None, "Cat\0Power", None, "\0Autechre"]
+    expected = ["Stereolab", None, "CatPower", None, "Autechre"]
+    assert pg.batch_to_pg_text_form(inputs) == expected
+
+
 def test_batch_to_pg_text_form_empty():
     assert pg.batch_to_pg_text_form([]) == []
+
+
+def test_batch_to_pg_text_form_all_none():
+    assert pg.batch_to_pg_text_form([None, None, None]) == [None, None, None]
 
 
 def test_batch_to_pg_text_form_all_clean():
