@@ -3133,7 +3133,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "wxyc-etl"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3165,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "wxyc-etl-python"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "pyo3",

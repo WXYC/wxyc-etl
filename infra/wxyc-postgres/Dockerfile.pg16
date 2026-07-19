@@ -23,3 +23,17 @@ LABEL org.opencontainers.image.licenses="MIT"
 #   docker run --rm --entrypoint /bin/bash <image> -c 'pg_config --sharedir'
 COPY data/wxyc_unaccent.rules    /usr/share/postgresql/16/tsearch_data/wxyc_unaccent.rules
 COPY data/wxyc_unaccent.version  /usr/share/postgresql/16/tsearch_data/wxyc_unaccent.version
+
+# Per-service PG tuning hook (WXYC/wxyc-etl#145). wxyc-entrypoint.sh `exec`s the
+# base /usr/local/bin/wrapper.sh, appending the optional $WXYC_PG_EXTRA_ARGS flag
+# list to the postgres invocation from *inside* the entrypoint — so the base
+# root->postgres privilege drop and SSL provisioning still run (unlike a Railway
+# Custom Start Command, which replaces the entrypoint and crash-loops as root).
+# No-op / byte-identical to the base when the env var is unset. See the script
+# header and docs/wxyc-postgres-image.md for the full safety rationale.
+COPY --chmod=0755 infra/wxyc-postgres/wxyc-entrypoint.sh /usr/local/bin/wxyc-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/wxyc-entrypoint.sh"]
+# Overriding ENTRYPOINT resets the inherited CMD to empty, so re-declare the base
+# CMD verbatim. This keeps `postgres` as argv[0] (the base privilege drop keys on
+# it) and preserves `-c listen_addresses=*` (the only flag that binds TCP).
+CMD ["postgres", "-p", "5432", "-c", "listen_addresses=*"]
