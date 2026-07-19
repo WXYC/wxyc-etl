@@ -168,7 +168,7 @@ jobs:
           tags: ${{ steps.tags.outputs.floating }}
       # Full smoke suite lives in infra/wxyc-postgres/smoke-test.sh so the exact
       # CI assertions are reproducible locally (off-prod validation evidence).
-      # It covers: baked-dictionary integrity, the byte-identical unset baseline
+      # It covers: baked-dictionary integrity, the runtime-identical unset baseline
       # (postgres user, SSL, listen_addresses), the WXYC_PG_EXTRA_ARGS tuning hook
       # (multi-flag, last-wins, command-line source), and process-model + restart
       # integrity. See the script header for the full list.

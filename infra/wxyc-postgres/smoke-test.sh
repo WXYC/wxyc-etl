@@ -12,10 +12,10 @@
 #   3. WXYC_PG_EXTRA_ARGS feature      — the 6-flag string applies as six distinct
 #      settings, last-wins over the stock default, sourced from the command line,
 #      and the privilege drop + SSL still hold.
-#   4. Process-model + restart integrity — PID 1 stays the base wrapper.sh (our
+#   4. Process-model + redeploy integrity — PID 1 stays the base wrapper.sh (our
 #      wxyc-entrypoint.sh `exec`s it, inserting no extra parent), the postmaster
-#      receives exactly the composed argv (re-declared CMD + appended extra), and
-#      a stop/start cycle keeps the tuning applied. NOTE: the pinned base's
+#      receives exactly the composed argv (its base's CMD + appended extra), and
+#      a full container replacement keeps the tuning applied. NOTE: the pinned base's
 #      wrapper.sh runs docker-entrypoint.sh WITHOUT `exec` and installs no signal
 #      traps, so it does not forward SIGINT/SIGTERM to the postmaster; clean
 #      shutdown on signal is a base-image concern, unchanged by this overlay and
@@ -61,6 +61,19 @@ assert_eq() { # <desc> <expected> <actual>
     fail "FAIL: $1 — expected [$2], got [$3]"
   fi
   echo "PASS: $1 = $3"
+}
+
+assert_no_root_error() { # <container> <label> — the privilege drop must have fired
+  # Capture logs into a variable first, THEN grep. Piping `docker logs` straight
+  # into `grep -q` is unsafe under `set -o pipefail`: grep -q exits on first match
+  # and can SIGPIPE `docker logs` (exit 141), which pipefail reports as the
+  # pipeline status — turning a real "\"root\" execution" match into a false PASS.
+  local logs
+  logs="$(docker logs "$1" 2>&1)"
+  if grep -q '"root" execution' <<<"$logs"; then
+    fail "$2: container logged a \"root\" execution error (privilege drop failed)"
+  fi
+  echo "PASS: $2: no \"root\" execution error in logs"
 }
 
 wait_ready() { # <container>
@@ -141,10 +154,7 @@ assert_eq "unset: postmaster runs as postgres" "postgres" "$(postmaster_user "$C
 assert_eq "unset: SSL on"                       "on"       "$(psql1 "$C_BASE" 'SHOW ssl;')"
 assert_eq "unset: listen_addresses"             "*"        "$(psql1 "$C_BASE" 'SHOW listen_addresses;')"
 assert_eq "unset: shared_buffers is stock default" "128MB"  "$(psql1 "$C_BASE" 'SHOW shared_buffers;')"
-if docker logs "$C_BASE" 2>&1 | grep -q '"root" execution'; then
-  fail "unset: container logged a \"root\" execution error (privilege drop failed)"
-fi
-echo "PASS: unset: no \"root\" execution error in logs"
+assert_no_root_error "$C_BASE" "unset"
 
 # ===========================================================================
 # 3. WXYC_PG_EXTRA_ARGS feature — full 6-flag string
@@ -156,10 +166,7 @@ wait_ready "$C_ENV"
 # Safety still holds with the env set.
 assert_eq "env: postmaster runs as postgres" "postgres" "$(postmaster_user "$C_ENV")"
 assert_eq "env: SSL on"                       "on"       "$(psql1 "$C_ENV" 'SHOW ssl;')"
-if docker logs "$C_ENV" 2>&1 | grep -q '"root" execution'; then
-  fail "env: container logged a \"root\" execution error (privilege drop failed)"
-fi
-echo "PASS: env: no \"root\" execution error in logs"
+assert_no_root_error "$C_ENV" "env"
 
 # All six flags word-split into distinct, applied settings.
 assert_eq "env: shared_buffers (last-wins over 128MB)" "2GB"  "$(psql1 "$C_ENV" 'SHOW shared_buffers;')"
@@ -193,10 +200,10 @@ assert_eq "env: shared_buffers source" "command line" \
 # process layer of its own: wxyc-entrypoint.sh `exec`s wrapper.sh, so PID 1 stays
 # wrapper.sh and the postmaster is not stranded behind an EXTRA non-forwarding
 # parent (the real intent behind the issue's signal criterion). Plus: the
-# postmaster receives exactly the composed argv, and the tuning survives a
-# stop/start cycle.
+# postmaster receives exactly the composed argv, and the tuning survives a full
+# container replacement (Railway redeploy).
 # ===========================================================================
-echo "--- [4/4] process-model + restart integrity ---"
+echo "--- [4/4] process-model + redeploy integrity ---"
 docker volume create "$VOL_SIG" >/dev/null
 docker run -d --name "$C_SIG" -v "${VOL_SIG}:/var/lib/postgresql/data" \
   -e POSTGRES_PASSWORD=smoke -e WXYC_PG_EXTRA_ARGS="-c shared_buffers=2GB" "$IMG" >/dev/null
@@ -208,16 +215,30 @@ wait_ready "$C_SIG"
 assert_eq "PID 1 is the base wrapper.sh (exec passthrough)" "wrapper.sh" \
   "$(docker exec "$C_SIG" cat /proc/1/comm)"
 
-# The postmaster receives exactly: re-declared CMD, then the appended extra flag.
-# The last-wins ordering is visible in the argv itself (extra after the CMD).
-assert_eq "postmaster argv = re-declared CMD + appended extra" \
-  "postgres -p 5432 -c listen_addresses=* -c shared_buffers=2GB" \
+# The postmaster receives exactly its OWN base's re-declared CMD, then the
+# appended extra flag (last-wins ordering is visible in the argv itself — extra
+# after the CMD). The two pinned bases differ (verified via
+# `docker buildx imagetools inspect`): pg17 sets listen_addresses on the command
+# line, pg16 provides it via postgresql.conf. Encode each base's CMD here so this
+# assertion catches drift if a future base-digest refresh changes it without the
+# Dockerfile CMD (and this case) being updated in lockstep.
+case "$PG" in
+  16) EXPECTED_BASE_CMD="postgres --port=5432" ;;
+  17) EXPECTED_BASE_CMD="postgres -p 5432 -c listen_addresses=*" ;;
+  *)  fail "unknown PG major $PG — add its base CMD (see Dockerfile.pg$PG) to the case above" ;;
+esac
+assert_eq "postmaster argv = base CMD + appended extra" \
+  "$EXPECTED_BASE_CMD -c shared_buffers=2GB" \
   "$(docker exec "$C_SIG" sh -c 'tr "\0" " " < /proc/"$(head -1 /var/lib/postgresql/data/postmaster.pid)"/cmdline | sed "s/ *\$//"')"
 
-# Survives a stop/start cycle (as a Railway redeploy would) with tuning intact.
-docker stop "$C_SIG" >/dev/null
-docker start "$C_SIG" >/dev/null
+# Survives a full container replacement — the faithful model of a Railway redeploy
+# (which recreates the container against the persisted volume, not a stop/start).
+# `docker rm -f` is SIGKILL with no stop-grace wait; the base ignores stop signals
+# anyway (see the section header), so this loses no fidelity and ~10s of wall time.
+docker rm -f "$C_SIG" >/dev/null
+docker run -d --name "$C_SIG" -v "${VOL_SIG}:/var/lib/postgresql/data" \
+  -e POSTGRES_PASSWORD=smoke -e WXYC_PG_EXTRA_ARGS="-c shared_buffers=2GB" "$IMG" >/dev/null
 wait_ready "$C_SIG"
-assert_eq "restart: shared_buffers still applied" "2GB" "$(psql1 "$C_SIG" 'SHOW shared_buffers;')"
+assert_eq "redeploy: shared_buffers still applied" "2GB" "$(psql1 "$C_SIG" 'SHOW shared_buffers;')"
 
 echo "=== ALL SMOKE ASSERTIONS PASSED (PG $PG) ==="

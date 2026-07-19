@@ -33,7 +33,12 @@ COPY data/wxyc_unaccent.version  /usr/share/postgresql/16/tsearch_data/wxyc_unac
 # header and docs/wxyc-postgres-image.md for the full safety rationale.
 COPY --chmod=0755 infra/wxyc-postgres/wxyc-entrypoint.sh /usr/local/bin/wxyc-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/wxyc-entrypoint.sh"]
-# Overriding ENTRYPOINT resets the inherited CMD to empty, so re-declare the base
-# CMD verbatim. This keeps `postgres` as argv[0] (the base privilege drop keys on
-# it) and preserves `-c listen_addresses=*` (the only flag that binds TCP).
-CMD ["postgres", "-p", "5432", "-c", "listen_addresses=*"]
+# Overriding ENTRYPOINT resets the inherited CMD to empty, so re-declare the pg16
+# base's CMD verbatim. Verified against the pinned digest above via
+# `docker buildx imagetools inspect`, the pg16 base CMD is `postgres --port=5432`
+# (NOT the same as pg17's — the two bases differ). This keeps `postgres` as
+# argv[0] (the base privilege drop keys on it). Unlike pg17, the pg16 base binds
+# TCP via `listen_addresses = '*'` in postgresql.conf, not a command-line flag, so
+# it is intentionally absent here. When refreshing the base digest, re-inspect and
+# match this CMD (the smoke test's per-version argv assertion guards the pairing).
+CMD ["postgres", "--port=5432"]
