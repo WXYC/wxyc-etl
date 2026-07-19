@@ -468,7 +468,7 @@ mod text_normalization_to_fuzzy {
             assert!(
                 result.is_some(),
                 "Failed to resolve normalized name {:?} (original: {:?}) at index {}",
-                &normalized[i],
+                normalized[i],
                 original,
                 i,
             );
