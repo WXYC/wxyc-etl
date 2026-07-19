@@ -17,15 +17,21 @@
 #
 # Contract
 # --------
-#   WXYC_PG_EXTRA_ARGS unset/empty -> byte-identical to the base image.
+#   WXYC_PG_EXTRA_ARGS unset/empty -> runtime-identical to the base image
+#     (same postgres argv, process model, privilege drop, and SSL).
 #   WXYC_PG_EXTRA_ARGS set         -> its words are appended as extra `postgres`
 #     argv after the inherited CMD. PostgreSQL command-line parsing is last-wins,
 #     so an appended `-c foo=bar` overrides an inherited default of the same key.
 #
 # Safety
 # ------
-#   - `exec` (not a child call) keeps postgres as PID 1, so SIGINT/SIGTERM reach
-#     it directly -> clean checkpoint + shutdown, no WAL replay on next start.
+#   - `exec` (not a child call) keeps the base wrapper.sh as PID 1 and inserts
+#     no extra parent of our own — the postmaster is not stranded behind an
+#     additional non-forwarding process, so signal semantics are exactly the
+#     base's. (Note: this pinned base's wrapper.sh runs docker-entrypoint.sh
+#     WITHOUT exec and installs no signal traps, so it does not itself forward
+#     SIGINT/SIGTERM to the postmaster; that is a base-image property this
+#     overlay preserves unchanged, not something it introduces.)
 #   - Absolute path to wrapper.sh so a base-image PATH change can't silently
 #     break the chain.
 #   - The value is spliced in via `exec … ${VAR}` and word-split into additional
