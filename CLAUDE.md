@@ -83,7 +83,7 @@ This repo also publishes the `wxyc-postgres` image (see `infra/wxyc-postgres/` a
 | `:pg17`, `:pg16` | Floating. Moves on every wxyc-etl release. Suitable for staging. |
 | `:pg17-vMAJOR.MINOR.PATCH`, `:pg16-vMAJOR.MINOR.PATCH` | Pinned (e.g. `:pg17-v0.4.1`). Production Railway services pin here; rollback target. |
 
-Consumers may set the optional `WXYC_PG_EXTRA_ARGS` env var on a Railway PG service to append per-service `postgres -c` tuning flags (durable across a volume reprovision, unlike `ALTER SYSTEM`). It is honored inside the image's entrypoint, is a no-op when unset (byte-identical to the base), and is documented in `docs/wxyc-postgres-image.md`. It's a consumer-facing surface: renaming or changing its append semantics is a breaking change for any service that sets it.
+Consumers may set the optional `WXYC_PG_EXTRA_ARGS` env var on a Railway PG service to append per-service `postgres -c` tuning flags (durable across a volume reprovision, unlike `ALTER SYSTEM`). It is honored inside the image's entrypoint, is a no-op when unset (runtime-identical to the base), and is documented in `docs/wxyc-postgres-image.md`. It's a consumer-facing surface: renaming or changing its append semantics is a breaking change for any service that sets it.
 
 The base image must stay on `ghcr.io/railwayapp-templates/postgres-ssl:N@sha256:<digest>` (digest-pinned, not floating). Refreshing the base digest is a release event — bump `Cargo.toml`, tag, ship a new pinned image, then operators swap each Railway PG one-by-one. **Don't move the base off `railwayapp-templates/postgres-ssl`** — Railway services depend on its SSL init hook, pgbackrest, pgvector, and `wrapper.sh` entrypoint; switching to stock `postgres:N` would silently strip all four.
 
