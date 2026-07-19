@@ -166,68 +166,15 @@ jobs:
           load: true
           platforms: linux/amd64
           tags: ${{ steps.tags.outputs.floating }}
+      # Full smoke suite lives in infra/wxyc-postgres/smoke-test.sh so the exact
+      # CI assertions are reproducible locally (off-prod validation evidence).
+      # It covers: baked-dictionary integrity, the byte-identical unset baseline
+      # (postgres user, SSL, listen_addresses), the WXYC_PG_EXTRA_ARGS tuning hook
+      # (multi-flag, last-wins, command-line source), and process-model + restart
+      # integrity. See the script header for the full list.
       - name: Smoke test
         shell: bash
-        env:
-          PG: ${{ matrix.pg }}
-        run: |
-          set -euo pipefail
-          IMG="${{ steps.tags.outputs.floating }}"
-          SHAREDIR="/usr/share/postgresql/${PG}"
-          EXPECTED_RULES_SHA=$(sha256sum data/wxyc_unaccent.rules | awk '{print $1}')
-          EXPECTED_VERSION_SHA=$(sha256sum data/wxyc_unaccent.version | awk '{print $1}')
-          docker run --rm -d --name wxyc-pg-smoke -e POSTGRES_PASSWORD=smoke "$IMG"
-          # Unconditional cleanup + log dump on any exit path so the container
-          # never lingers and a failed step always surfaces PG startup output.
-          trap 'docker logs wxyc-pg-smoke 2>&1 || true; docker stop wxyc-pg-smoke >/dev/null 2>&1 || true' EXIT
-          # Wait for PG to accept connections (up to 60s); fail fast if it never does.
-          READY=0
-          for _ in $(seq 1 60); do
-            if docker exec wxyc-pg-smoke pg_isready -U postgres >/dev/null 2>&1; then
-              READY=1
-              break
-            fi
-            sleep 1
-          done
-          if [[ "$READY" -ne 1 ]]; then
-            echo "::error ::Postgres did not become ready within 60s"
-            exit 1
-          fi
-          ACTUAL_RULES_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.rules" | awk '{print $1}')
-          if [[ "$ACTUAL_RULES_SHA" != "$EXPECTED_RULES_SHA" ]]; then
-            echo "::error ::wxyc_unaccent.rules SHA-256 mismatch in image: expected $EXPECTED_RULES_SHA, got $ACTUAL_RULES_SHA"
-            exit 1
-          fi
-          # Verify the .version companion landed too. Dockerfile COPYs both
-          # files; if a future edit drops the .version COPY, the rules-only
-          # checks above would still pass green and consumers that introspect
-          # the version file (per docs/wxyc-postgres-image.md) would silently
-          # see a stock-base image.
-          ACTUAL_VERSION_SHA=$(docker exec wxyc-pg-smoke sha256sum "${SHAREDIR}/tsearch_data/wxyc_unaccent.version" | awk '{print $1}')
-          if [[ "$ACTUAL_VERSION_SHA" != "$EXPECTED_VERSION_SHA" ]]; then
-            echo "::error ::wxyc_unaccent.version SHA-256 mismatch in image: expected $EXPECTED_VERSION_SHA, got $ACTUAL_VERSION_SHA"
-            exit 1
-          fi
-          STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
-            "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.rules')).size > 0;")
-          if [[ "$STAT_OK" != "t" ]]; then
-            echo "::error ::pg_stat_file did not report a non-empty rules file: $STAT_OK"
-            exit 1
-          fi
-          VERSION_STAT_OK=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
-            "SELECT (pg_stat_file('${SHAREDIR}/tsearch_data/wxyc_unaccent.version')).size > 0;")
-          if [[ "$VERSION_STAT_OK" != "t" ]]; then
-            echo "::error ::pg_stat_file did not report a non-empty version file: $VERSION_STAT_OK"
-            exit 1
-          fi
-          # DROP IF EXISTS keeps the smoke idempotent across job re-runs even
-          # though `docker run --rm` discards the container each time.
-          RESULT=$(docker exec wxyc-pg-smoke psql -U postgres -t -A -c \
-            "CREATE EXTENSION IF NOT EXISTS unaccent; DROP TEXT SEARCH DICTIONARY IF EXISTS wxyc_unaccent; CREATE TEXT SEARCH DICTIONARY wxyc_unaccent (TEMPLATE = unaccent, RULES = 'wxyc_unaccent'); SELECT ts_lexize('wxyc_unaccent', 'café');")
-          if [[ "$RESULT" != *"{cafe}"* ]]; then
-            echo "::error ::ts_lexize('wxyc_unaccent', 'café') returned unexpected: $RESULT"
-            exit 1
-          fi
+        run: bash infra/wxyc-postgres/smoke-test.sh "${{ steps.tags.outputs.floating }}" "${{ matrix.pg }}"
       - name: Build + push (multi-arch)
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
         uses: docker/build-push-action@v6
