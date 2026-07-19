@@ -29,7 +29,7 @@ COPY data/wxyc_unaccent.version  /usr/share/postgresql/17/tsearch_data/wxyc_unac
 # list to the postgres invocation from *inside* the entrypoint — so the base
 # root->postgres privilege drop and SSL provisioning still run (unlike a Railway
 # Custom Start Command, which replaces the entrypoint and crash-loops as root).
-# No-op / byte-identical to the base when the env var is unset. See the script
+# No-op / runtime-identical to the base when the env var is unset. See the script
 # header and docs/wxyc-postgres-image.md for the full safety rationale.
 COPY --chmod=0755 infra/wxyc-postgres/wxyc-entrypoint.sh /usr/local/bin/wxyc-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/wxyc-entrypoint.sh"]

@@ -7,7 +7,7 @@
 #
 # It asserts, in order:
 #   1. Baked dictionary integrity      — wxyc_unaccent.rules/.version SHA + ts_lexize.
-#   2. Byte-identical baseline (unset) — runs as the `postgres` user, SSL on,
+#   2. Runtime-identical baseline (unset) — runs as the `postgres` user, SSL on,
 #      listen_addresses='*', no "root" execution error.
 #   3. WXYC_PG_EXTRA_ARGS feature      — the 6-flag string applies as six distinct
 #      settings, last-wins over the stock default, sourced from the command line,
@@ -18,8 +18,8 @@
 #      a stop/start cycle keeps the tuning applied. NOTE: the pinned base's
 #      wrapper.sh runs docker-entrypoint.sh WITHOUT `exec` and installs no signal
 #      traps, so it does not forward SIGINT/SIGTERM to the postmaster; clean
-#      shutdown on signal is a base-image concern, byte-identical here and out of
-#      scope for this overlay (see the section-4 comment).
+#      shutdown on signal is a base-image concern, unchanged by this overlay and
+#      out of scope (see the section-4 comment).
 #
 # Requires: docker, and read access to <repo>/data (resolved relative to this
 # script, not $CWD).
@@ -112,7 +112,7 @@ docker volume rm "$VOL_SIG" >/dev/null 2>&1 || true
 echo "=== Image: $IMG  (PG $PG, SHAREDIR $SHAREDIR) ==="
 
 # ===========================================================================
-# 1 + 2. Baseline container — WXYC_PG_EXTRA_ARGS unset (byte-identical path)
+# 1 + 2. Baseline container — WXYC_PG_EXTRA_ARGS unset (runtime-identical path)
 # ===========================================================================
 echo "--- [1/4] baked dictionary integrity + [2/4] unset baseline ---"
 docker run -d --name "$C_BASE" -e POSTGRES_PASSWORD=smoke "$IMG" >/dev/null
@@ -136,7 +136,7 @@ docker exec -e PGPASSWORD=smoke "$C_BASE" psql -h 127.0.0.1 -U postgres -q -c \
 assert_eq "ts_lexize('wxyc_unaccent','café')" "{cafe}" \
   "$(psql1 "$C_BASE" "SELECT ts_lexize('wxyc_unaccent', 'café');")"
 
-# 2. Byte-identical baseline: privilege drop, SSL, TCP bind all intact with no env.
+# 2. Runtime-identical baseline: privilege drop, SSL, TCP bind all intact with no env.
 assert_eq "unset: postmaster runs as postgres" "postgres" "$(postmaster_user "$C_BASE")"
 assert_eq "unset: SSL on"                       "on"       "$(psql1 "$C_BASE" 'SHOW ssl;')"
 assert_eq "unset: listen_addresses"             "*"        "$(psql1 "$C_BASE" 'SHOW listen_addresses;')"
@@ -186,8 +186,8 @@ assert_eq "env: shared_buffers source" "command line" \
 # boot does a trivial ("redo is not required") crash recovery. That is a property
 # of the BASE image — verified identical on the unmodified base — not of this
 # overlay, and making it clean would require diverging from the base (out of
-# scope; the image is a pure overlay, and it must stay byte-identical to the base
-# when WXYC_PG_EXTRA_ARGS is unset).
+# scope; the image is a pure overlay, and it must stay runtime-identical to the
+# base when WXYC_PG_EXTRA_ARGS is unset).
 #
 # What this overlay MUST preserve, and what we assert here, is that it inserts NO
 # process layer of its own: wxyc-entrypoint.sh `exec`s wrapper.sh, so PID 1 stays
