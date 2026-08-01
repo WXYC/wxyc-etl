@@ -21,8 +21,17 @@ from wxyc_etl import text
         ("Sessa (22)", False, "Sessa"),
         # Trailing whitespace after the suffix: DECISION — take the
         # broader, trailing-whitespace-tolerant LML pattern for
-        # `broad=False` too (see the Rust module docs).
+        # `broad=False` too — a superset for ASCII-digit disambiguators
+        # (all real Discogs shapes; see the ASCII-digit-narrowing row below
+        # for the one input class where that framing doesn't literally
+        # hold; see the Rust module docs).
         ("Plug (2)   ", False, "Plug"),
+        # ASCII-digit narrowing (see the Rust module docs): Python's `\d`
+        # in both narrow LML regexes is Unicode-aware and would strip this
+        # Arabic-Indic-digit suffix; this binding's narrow mode is
+        # ASCII-only and leaves it alone. Never observed in a real Discogs
+        # disambiguator (always ASCII `0`-`9`).
+        ("Foo (٢)", False, "Foo (٢)"),
         # Country/region code: only the broad LML variant strips this;
         # `broad` is an explicit caller-chosen parameter, not inferred.
         ("Stereolab (UK)", False, "Stereolab (UK)"),

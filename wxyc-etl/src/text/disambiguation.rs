@@ -9,9 +9,11 @@
 //!   tolerance for whitespace *after* the closing paren.
 //! - `clients/streaming/matching.py`'s `_DISCOGS_DISAMBIG_RE =
 //!   re.compile(r"\s*\(\d+\)\s*$")`. Same numeric-only shape, but tolerant
-//!   of trailing whitespace after `)`. A strict superset of the pattern
-//!   above — no real disagreement to adjudicate, just a widen; `broad =
-//!   false` mode here takes this (broader) variant.
+//!   of trailing whitespace after `)`. A superset of the pattern above for
+//!   every ASCII-digit disambiguator — no real disagreement to adjudicate,
+//!   just a widen; `broad = false` mode here takes this (broader) variant.
+//!   (Not a literal superset over arbitrary input — see "ASCII-digit
+//!   narrowing" below.)
 //! - `clients/streaming/matching.py::strip_discogs_disambig` —
 //!   `_DISCOGS_DISAMBIG_BROAD_RE = re.compile(
 //!   r"\s*\(\s*[A-Za-z0-9][A-Za-z0-9\s.\-]{0,18}\)\s*$")`. Also strips
@@ -42,6 +44,21 @@
 //! be part of a real name (LML's own `normalize_artist_credit` only strips
 //! the numeric form, for exactly this reason), `true` for contexts that
 //! want the full Discogs-suffix surface (LML's `strip_discogs_disambig`).
+//!
+//! ## ASCII-digit narrowing (deliberate; wxyc-etl#147)
+//!
+//! Python's `\d` inside `_DISCOGS_SUFFIX_RE` and `_DISCOGS_DISAMBIG_RE` is
+//! Unicode-aware by default — it matches *any* Unicode decimal-digit
+//! codepoint (Nd category), not just ASCII `0`-`9`. This implementation's
+//! narrow mode uses [`char::is_ascii_digit`], so `"Foo (٢)"` (Arabic-Indic
+//! digit U+0662) was stripped by both LML narrow regexes but is left
+//! unchanged here. Real Discogs disambiguators are always ASCII digits
+//! (Discogs assigns them programmatically, `(1)`, `(2)`, ...), so this is a
+//! superset for every disambiguator shape that actually occurs — not a
+//! literal claim about arbitrary Unicode input. (Broad mode's character
+//! class has no such gap: `_DISCOGS_DISAMBIG_BROAD_RE`'s `[A-Za-z0-9]` is
+//! already an explicit ASCII range in the Python source, matching
+//! [`char::is_ascii_alphanumeric`] exactly.)
 
 /// Max length of the parenthetical *content* (excluding the parens) that
 /// `broad` mode treats as a disambiguator. Mirrors
@@ -154,9 +171,18 @@ mod tests {
             // (anchored tight to end-of-string); `clients/streaming/
             // matching.py`'s `_DISCOGS_DISAMBIG_RE` (`\s*\(\d+\)\s*$`)
             // would. DECISION: take the broader, trailing-whitespace-
-            // tolerant pattern for `broad = false` too — a strict superset,
-            // no real case loses coverage.
+            // tolerant pattern for `broad = false` too — a superset for
+            // ASCII-digit disambiguators (all real Discogs shapes; see the
+            // ASCII-digit-narrowing row below for the one input class where
+            // that framing doesn't literally hold).
             ("Plug (2)   ", false, "Plug"),
+            // ASCII-digit narrowing (see the module docs): Python's `\d` in
+            // both narrow LML regexes is Unicode-aware and would strip this
+            // Arabic-Indic-digit suffix; this implementation's narrow mode
+            // is ASCII-only and leaves it alone. Never observed in a real
+            // Discogs disambiguator (they're always ASCII `0`-`9`), so the
+            // "superset" framing above holds in practice, not literally.
+            ("Foo (\u{0662})", false, "Foo (\u{0662})"),
             // Country/region code: only the broad LML variant
             // (`_DISCOGS_DISAMBIG_BROAD_RE`) strips this; both narrow
             // variants agree it should NOT strip. `broad` is an explicit

@@ -170,8 +170,9 @@ fn batch_to_ascii_form(inputs: Vec<String>) -> Vec<String> {
 /// Accepts None (returns "") so Python callers don't need to guard NULL
 /// values from DB columns or optional API fields.
 #[pyfunction]
-fn fold_conjunctions(s: Option<&str>) -> String {
-    s.map(wxyc_etl::text::fold_conjunctions).unwrap_or_default()
+fn fold_conjunctions(name: Option<&str>) -> String {
+    name.map(wxyc_etl::text::fold_conjunctions)
+        .unwrap_or_default()
 }
 
 /// wxyc-etl#147: strip a trailing Discogs artist/label disambiguation
