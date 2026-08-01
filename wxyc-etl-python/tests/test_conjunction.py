@@ -29,8 +29,22 @@ from wxyc_etl import text
         ("Foo& Bar", "Foo& Bar"),
         # Multiple interior spaces collapse to a single " and ".
         ("Duke Ellington  &  John Coltrane", "Duke Ellington and John Coltrane"),
-        # Multiple conjunctions in one string.
+        # Multiple conjunctions in one string, spaced apart.
         ("A & B & C", "A and B and C"),
+        # Known divergence from `identity/normalize.py` (see the Rust
+        # module docs): two ampersands sharing a single whitespace run fold
+        # independently here ("A and and B"), whereas Python's
+        # non-overlapping regex sub consumes the shared space in its first
+        # match and yields "A and & B". Not a realistic artist credit
+        # shape; documented rather than special-cased.
+        ("A & & B", "A and and B"),
+        # Known divergence from all three LML variants (see the Rust module
+        # docs): this binding's whitespace check is Unicode `White_Space`
+        # only, whereas Python's `\s` additionally matches the ASCII
+        # info-separator control characters U+001C..=U+001F. Every LML
+        # variant folds this; this implementation does not. Control
+        # characters never appear in real names.
+        ("A\x1c&\x1cB", "A\x1c&\x1cB"),
         # No ampersand: passthrough, including trailing whitespace (this
         # function does not trim).
         ("Stereolab", "Stereolab"),

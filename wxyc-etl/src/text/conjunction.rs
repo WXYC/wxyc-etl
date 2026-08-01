@@ -40,6 +40,30 @@
 //! direction (`normalize_artist_credit`'s `_AND_RE`) exists purely to
 //! generate an alternate Discogs *search* query variant; it has no place in
 //! a single-output canonicalization primitive and is out of scope here.
+//!
+//! ## Known divergences from `identity/normalize.py` (documented, not fixed;
+//! wxyc-etl#147)
+//!
+//! - **Adjacent ampersands sharing one whitespace run**: for `"A & & B"`,
+//!   Python's `_AMPERSAND_CONJUNCTION_RE.sub(" and ", ...)` performs
+//!   non-overlapping left-to-right matches, so the first match (`" & "`,
+//!   consuming the space between the two `&`s) leaves only `"& B"` for the
+//!   scanner to continue from — yielding `"A and & B"`. This implementation
+//!   folds each `&` independently against whatever whitespace surrounds it
+//!   in the *original* string, so both fold and the shared space is reused
+//!   — yielding `"A and and B"`. Two ampersands separated by nothing but a
+//!   single shared space does not occur in a real artist credit, so this is
+//!   recorded rather than special-cased.
+//! - **Whitespace character class**: this implementation treats "whitespace"
+//!   as [`char::is_whitespace`] (Unicode `White_Space` property). Python's
+//!   `\s` — used by all three LML regexes — additionally matches the four
+//!   ASCII information-separator control characters U+001C..=U+001F (a
+//!   CPython historical quirk, also called out in
+//!   `text::identity::strip_leading_article`'s docs). `"A\u{1c}&\u{1c}B"`
+//!   folds under every LML variant but not here. Control characters never
+//!   appear in real artist/track names, so this is a documented, practically
+//!   irrelevant divergence rather than a reason to widen the whitespace
+//!   check.
 
 /// Fold the "&" conjunction to "and" wherever it is surrounded by Unicode
 /// whitespace on both sides; leaves glued/typographic ampersands (`R&B`,
@@ -131,8 +155,23 @@ mod tests {
                 "Duke Ellington  &  John Coltrane",
                 "Duke Ellington and John Coltrane",
             ),
-            // Multiple conjunctions in one string.
+            // Multiple conjunctions in one string, spaced apart.
             ("A & B & C", "A and B and C"),
+            // Known divergence from `identity/normalize.py` (see module
+            // docs): two ampersands sharing a single whitespace run fold
+            // independently here ("A and and B"), whereas Python's
+            // non-overlapping regex sub consumes the shared space in its
+            // first match and yields "A and & B". Not a realistic artist
+            // credit shape; documented rather than special-cased.
+            ("A & & B", "A and and B"),
+            // Known divergence from all three LML variants (see module
+            // docs): this implementation's whitespace check is Unicode
+            // `White_Space` only, whereas Python's `\s` additionally
+            // matches the ASCII info-separator control characters
+            // U+001C..=U+001F. Every LML variant folds this; this
+            // implementation does not. Control characters never appear in
+            // real names.
+            ("A\u{1c}&\u{1c}B", "A\u{1c}&\u{1c}B"),
             // No ampersand at all: passthrough, including a case with
             // trailing whitespace this function deliberately does not trim.
             ("Stereolab", "Stereolab"),
