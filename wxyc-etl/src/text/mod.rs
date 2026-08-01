@@ -6,11 +6,14 @@
 //! use wxyc_etl::text::{
 //!     to_match_form, ArtistFilter, TitleFilter,
 //!     is_compilation_artist, split_artist_name, batch_to_match_form,
+//!     fold_conjunctions, strip_discogs_disambiguation,
 //! };
 //! ```
 
 pub mod batch;
 pub mod compilation;
+pub mod conjunction;
+pub mod disambiguation;
 pub mod filter;
 pub mod folds;
 pub mod forms;
@@ -21,6 +24,8 @@ pub mod split;
 // Convenience re-exports for the most common entry points.
 pub use batch::{batch_filter, batch_to_ascii_form, batch_to_match_form, batch_to_storage_form};
 pub use compilation::is_compilation_artist;
+pub use conjunction::fold_conjunctions;
+pub use disambiguation::strip_discogs_disambiguation;
 pub use filter::{ArtistFilter, TitleFilter};
 pub use forms::{to_ascii_form, to_match_form, to_storage_form};
 pub use identity::{

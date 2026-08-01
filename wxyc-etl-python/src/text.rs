@@ -23,6 +23,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(batch_to_storage_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_match_form, m)?)?;
     m.add_function(wrap_pyfunction!(batch_to_ascii_form, m)?)?;
+    m.add_function(wrap_pyfunction!(fold_conjunctions, m)?)?;
+    m.add_function(wrap_pyfunction!(strip_discogs_disambiguation, m)?)?;
     Ok(())
 }
 
@@ -157,4 +159,34 @@ fn batch_to_match_form(inputs: Vec<String>) -> Vec<String> {
 #[pyfunction]
 fn batch_to_ascii_form(inputs: Vec<String>) -> Vec<String> {
     wxyc_etl::text::batch_to_ascii_form(&inputs)
+}
+
+/// wxyc-etl#147: fold the "&" conjunction to "and" when it is padded by
+/// whitespace on both sides; leaves glued/typographic ampersands (`R&B`,
+/// `A&E`, `AT&T`) untouched. Promotes and reconciles three overlapping
+/// `library-metadata-lookup` implementations — see the Rust
+/// `wxyc_etl::text::conjunction` module docs for the full decision record.
+///
+/// Accepts None (returns "") so Python callers don't need to guard NULL
+/// values from DB columns or optional API fields.
+#[pyfunction]
+fn fold_conjunctions(s: Option<&str>) -> String {
+    s.map(wxyc_etl::text::fold_conjunctions).unwrap_or_default()
+}
+
+/// wxyc-etl#147: strip a trailing Discogs artist/label disambiguation
+/// suffix. `broad=False` is numeric-only (`"Plug (2)"` -> `"Plug"`);
+/// `broad=True` also strips country/region codes and short word-form
+/// qualifiers (`"Stereolab (UK)"` -> `"Stereolab"`, `"Sade (band)"` ->
+/// `"Sade"`). Promotes and reconciles three overlapping
+/// `library-metadata-lookup` implementations — see the Rust
+/// `wxyc_etl::text::disambiguation` module docs for the full decision
+/// record.
+///
+/// Accepts None for `name` (returns "") so Python callers don't need to
+/// guard NULL values from DB columns or optional API fields.
+#[pyfunction]
+fn strip_discogs_disambiguation(name: Option<&str>, broad: bool) -> String {
+    name.map(|n| wxyc_etl::text::strip_discogs_disambiguation(n, broad))
+        .unwrap_or_default()
 }
