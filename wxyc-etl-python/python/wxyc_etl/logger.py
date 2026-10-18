@@ -7,7 +7,9 @@ tags ``repo``, ``tool``, ``step``, and ``run_id`` (``step`` is set per-call via
 :func:`logging.Logger.info` ``extra=`` or via :class:`LoggerStep`). When
 ``SENTRY_DSN`` is set in the environment (or supplied to :func:`init_logger`)
 unhandled exceptions and ``logger.error`` events are forwarded to Sentry with
-the same tags.
+the same tags. When ``POSTHOG_ERRORS_API_KEY`` is set and the optional
+``posthog`` extra is installed, ERROR records are also sent to PostHog error
+tracking (see :class:`_PosthogErrorHandler`); Sentry keeps working alongside.
 
 Usage::
 
@@ -29,9 +31,20 @@ import atexit
 import logging
 import os
 import sys
+import threading
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Callable, Optional
+
+# Backstop constants, kept in step with wxyc-fastapi's ERROR-to-PostHog handler.
+POSTHOG_ERRORS_BUCKET_CAPACITY = 20
+POSTHOG_ERRORS_REFILL_PER_SECOND = 1.0
+POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS = 60.0
+_MAX_TRACKED_FINGERPRINTS = 512
+_DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
+# Loggers whose output must never be re-captured (the SDK logs through these).
+_POSTHOG_SKIP_LOGGERS = ("posthog", "backoff", "wxyc_etl")
 
 
 @dataclass(frozen=True)
@@ -50,11 +63,19 @@ class LoggerGuard:
     ``atexit`` hook) to drain Sentry before the process exits.
     """
 
-    def __init__(self, run_id: str, sentry_enabled: bool) -> None:
+    def __init__(
+        self, run_id: str, sentry_enabled: bool, posthog_client: Any = None
+    ) -> None:
         self.run_id = run_id
         self.sentry_enabled = sentry_enabled
+        self._posthog_client = posthog_client
 
     def flush(self, timeout: float = 2.0) -> None:
+        if self._posthog_client is not None:
+            try:
+                self._posthog_client.flush()
+            except Exception:  # pragma: no cover - flush is best-effort
+                pass
         if not self.sentry_enabled:
             return
         try:
@@ -89,6 +110,110 @@ class _ContextFilter(logging.Filter):
         if not hasattr(record, "step"):
             record.step = ""
         return True
+
+
+class _PosthogErrorHandler(logging.Handler):
+    """Send ERROR records to PostHog error tracking.
+
+    Records with ``exc_info`` go through ``capture_exception``; the rest become
+    a synthesized ``$exception`` event fingerprinted by logger name and
+    unformatted message template. A same-fingerprint dedupe window and a token
+    bucket bound the volume so an error loop cannot flood the project.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        clock: Callable[[], float] = time.monotonic,
+        capacity: float = POSTHOG_ERRORS_BUCKET_CAPACITY,
+        refill_per_second: float = POSTHOG_ERRORS_REFILL_PER_SECOND,
+        dedupe_window: float = POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS,
+    ) -> None:
+        super().__init__(level=logging.ERROR)
+        self._client = client
+        self._clock = clock
+        self._capacity = capacity
+        self._refill = refill_per_second
+        self._window = dedupe_window
+        self._tokens = float(capacity)
+        self._last_refill = clock()
+        self._seen: dict[tuple, float] = {}
+        self._guard = threading.local()
+
+    def _admit(self, key: tuple) -> bool:
+        now = self._clock()
+        with self.lock:
+            last = self._seen.get(key)
+            if last is not None and now - last < self._window:
+                return False
+            elapsed = now - self._last_refill
+            self._last_refill = now
+            self._tokens = min(self._capacity, self._tokens + elapsed * self._refill)
+            if self._tokens < 1:
+                return False
+            self._tokens -= 1
+            if len(self._seen) >= _MAX_TRACKED_FINGERPRINTS:
+                self._seen = {k: t for k, t in self._seen.items() if now - t < self._window}
+                if len(self._seen) >= _MAX_TRACKED_FINGERPRINTS:
+                    self._seen.clear()
+            self._seen[key] = now
+            return True
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name.split(".")[0] in _POSTHOG_SKIP_LOGGERS:
+            return
+        if getattr(self._guard, "active", False):
+            return
+        exc_type = record.exc_info[0] if record.exc_info else None
+        template = str(record.msg)
+        if not self._admit((record.name, template, exc_type)):
+            return
+        props = {
+            key: getattr(record, key, "")
+            for key in ("repo", "tool", "run_id", "step")
+        }
+        props["$process_person_profile"] = False
+        distinct_id = props["run_id"] or record.name
+        self._guard.active = True
+        try:
+            if record.exc_info and record.exc_info[0] is not None:
+                self._client.capture_exception(
+                    record.exc_info, distinct_id=distinct_id, properties=props
+                )
+            else:
+                props["$exception_list"] = [
+                    {
+                        "type": record.name,
+                        "value": record.getMessage(),
+                        "mechanism": {"handled": True, "type": "logging"},
+                    }
+                ]
+                props["$exception_fingerprint"] = [record.name, template]
+                self._client.capture(
+                    "$exception", distinct_id=distinct_id, properties=props
+                )
+        except Exception:
+            pass  # error reporting must never break the pipeline
+        finally:
+            self._guard.active = False
+
+
+def _build_posthog_handler() -> Optional[_PosthogErrorHandler]:
+    """Return a handler when ``POSTHOG_ERRORS_API_KEY`` is set and the optional
+    ``posthog`` extra imports; otherwise ``None`` (fail-open)."""
+
+    api_key = os.environ.get("POSTHOG_ERRORS_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from posthog import Posthog
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "POSTHOG_ERRORS_API_KEY is set but the posthog extra is not installed"
+        )
+        return None
+    host = os.environ.get("POSTHOG_HOST") or _DEFAULT_POSTHOG_HOST
+    return _PosthogErrorHandler(Posthog(api_key, host=host))
 
 
 _INITIALIZED = False
@@ -152,7 +277,16 @@ def init_logger(
         root.addHandler(handler)
         root.setLevel(level)
 
-        guard = LoggerGuard(rid, sentry_enabled)
+        posthog_handler = _build_posthog_handler()
+        if posthog_handler is not None:
+            posthog_handler.addFilter(_ContextFilter(repo, tool, rid))
+            root.addHandler(posthog_handler)
+
+        guard = LoggerGuard(
+            rid,
+            sentry_enabled,
+            posthog_handler._client if posthog_handler is not None else None,
+        )
         atexit.register(guard.flush)
         _INITIALIZED = True
         return guard
