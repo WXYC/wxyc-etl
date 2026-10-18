@@ -44,4 +44,8 @@ log = logging.getLogger(__name__)
 log.info("loaded recordings", extra={"step": "import", "rows": 42})
 ```
 
+### PostHog error tracking
+
+When `POSTHOG_ERRORS_API_KEY` is set and the optional `posthog` extra is installed (`pip install wxyc-etl[posthog]`), `init_logger` also attaches a handler that sends ERROR records to PostHog error tracking alongside Sentry. Records with `exc_info` go through `capture_exception`; others become a synthesized `$exception` event with fingerprint `[logger name, unformatted message]`. `repo`, `tool`, `step`, and `run_id` ride along as properties. `POSTHOG_HOST` overrides the default `https://us.i.posthog.com`. A token bucket (`POSTHOG_ERRORS_BUCKET_CAPACITY` / `POSTHOG_ERRORS_REFILL_PER_SECOND`) and a same-fingerprint dedupe window (`POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS`) cap volume. Without the key or the extra, nothing is installed; the SDK's own `posthog` and `backoff` loggers are never captured.
+
 `init_logger` is idempotent — calling it again replaces the tag values without re-installing handlers. Drop the guard or call `guard.flush()` to drain Sentry before exit (also registered via `atexit`).

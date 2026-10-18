@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+posthog = ["posthog>=6.0"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
