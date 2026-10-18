@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 import types
 from unittest.mock import MagicMock
 
@@ -40,6 +41,7 @@ def _reset_logging(monkeypatch):
     saved_level = root.level
     root.handlers.clear()
     monkeypatch.setattr(mod, "_INITIALIZED", False)
+    monkeypatch.setattr(mod, "_POSTHOG_CLIENT", None)
 
     yield
 
@@ -105,7 +107,8 @@ def test_record_without_exc_info_synthesizes_exception_event():
             "mechanism": {"handled": True, "type": "logging"},
         }
     ]
-    assert props["$exception_fingerprint"] == ["etl.lookup", "lookup failed for %s"]
+    # PostHog types $exception_fingerprint as a single string; a list is dropped.
+    assert props["$exception_fingerprint"] == "etl.lookup:lookup failed for %s"
     assert (props["repo"], props["tool"], props["run_id"], props["step"]) == ("r", "t", "run-1", "import")
 
 
@@ -295,3 +298,81 @@ def test_guard_flush_drains_posthog_client(monkeypatch):
     init_logger(repo="r", tool="t").flush()
 
     cls.return_value.flush.assert_called_once()
+
+
+def test_dedupe_keys_on_the_joined_fingerprint_string():
+    client = MagicMock()
+    handler = _handler(client)
+
+    handler.handle(_record("b:c", name="etl.a"))
+    handler.handle(_record("c", name="etl.a:b"))  # same joined fingerprint
+
+    assert _sent(client) == 1
+
+
+def test_backstop_constants_match_wxyc_fastapi():
+    assert mod.POSTHOG_ERRORS_BUCKET_CAPACITY == 100
+    assert mod.POSTHOG_ERRORS_REFILL_PER_SECOND == 30 / 60
+
+
+def test_concurrent_logging_respects_bucket():
+    client = MagicMock()
+    handler = _handler(client, capacity=10, refill_per_second=0)
+    barrier = threading.Barrier(8)
+
+    def worker(n: int) -> None:
+        barrier.wait()
+        for i in range(25):
+            handler.handle(_record(f"t{n} m{i}"))
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert _sent(client) == 10
+
+
+class _BrokenImport:
+    def __getattr__(self, name):
+        raise RuntimeError("broken posthog install")
+
+
+def test_init_fails_open_on_non_import_error(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    monkeypatch.setitem(sys.modules, "posthog", _BrokenImport())
+
+    init_logger(repo="r", tool="t")
+
+    assert not any(isinstance(h, mod._PosthogErrorHandler) for h in logging.getLogger().handlers)
+
+
+def test_init_fails_open_when_client_constructor_raises(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+    cls.side_effect = ValueError("bad host")
+
+    init_logger(repo="r", tool="t")
+
+    assert not any(isinstance(h, mod._PosthogErrorHandler) for h in logging.getLogger().handlers)
+
+
+def test_repeat_init_guard_still_drains_posthog(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+
+    init_logger(repo="r", tool="t")
+    init_logger(repo="r2", tool="t2").flush()
+
+    cls.return_value.flush.assert_called()
+
+
+def test_repeat_init_leaves_foreign_handlers_alone(monkeypatch):
+    foreign = logging.NullHandler()
+
+    init_logger(repo="r", tool="t")
+    logging.getLogger().addHandler(foreign)
+    init_logger(repo="r2", tool="t2")
+
+    assert not any(isinstance(f, mod._ContextFilter) for f in foreign.filters)

@@ -7,7 +7,7 @@ Shared Rust crate (with PyO3 Python bindings) that supplies the cross-cutting pr
 CLAUDE.md is a router for the always-loaded reference card. Topic depth lives in `docs/`:
 
 - **[`docs/architecture.md`](docs/architecture.md)** — Workspace layout (Rust crate + PyO3 bindings), per-module purpose table (`text`, `pg`, `pipeline`, `csv_writer`, `sqlite`, `state`, `import`, `schema`, `fuzzy`, `parser`, `logger`, `cli`)
-- **[`docs/observability.md`](docs/observability.md)** — `wxyc_etl::logger::init` (Rust) / `init_logger` (Python), required tag taxonomy (`repo`, `tool`, `step`, `run_id`), Sentry forwarding via `SENTRY_DSN`
+- **[`docs/observability.md`](docs/observability.md)** — `wxyc_etl::logger::init` (Rust) / `init_logger` (Python), required tag taxonomy (`repo`, `tool`, `step`, `run_id`), Sentry forwarding via `SENTRY_DSN`, and (Python only) PostHog error tracking via `POSTHOG_ERRORS_API_KEY` with the optional `posthog` extra
 - **[`docs/cli-convention.md`](docs/cli-convention.md)** — Cache-builder CLI shape (`build` / `import` subcommands, `--database-url` with env fallback, `#[command(flatten)]` composition rule)
 - **[`docs/python-bindings.md`](docs/python-bindings.md)** — `wxyc-etl-python` layout, maturin packaging, exposed vs unexposed submodules, editable install for downstream repos, `WXYC_ETL_NO_RUST=1` pure-Python fallback
 - **[`docs/testing.md`](docs/testing.md)** — Test commands, notable test files (Python parity, identity-normalization parity, `wxyc_unaccent.rules` freshness, Rust↔Postgres parity, regression report), fixture convention

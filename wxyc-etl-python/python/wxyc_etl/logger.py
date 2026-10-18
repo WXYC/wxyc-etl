@@ -21,8 +21,8 @@ Usage::
     log = logging.getLogger(__name__)
     log.info("loaded recordings", extra={"step": "import", "rows": 42})
 
-The returned :class:`LoggerGuard` flushes pending Sentry events when its
-``flush`` method is called (or when the program exits).
+The returned :class:`LoggerGuard` flushes pending Sentry and PostHog events
+when its ``flush`` method is called (or when the program exits).
 """
 
 from __future__ import annotations
@@ -37,9 +37,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-# Backstop constants, kept in step with wxyc-fastapi's ERROR-to-PostHog handler.
-POSTHOG_ERRORS_BUCKET_CAPACITY = 20
-POSTHOG_ERRORS_REFILL_PER_SECOND = 1.0
+# Backstop constants, kept in step with wxyc-fastapi's ERROR-to-PostHog handler
+# (ERRORS_BURST = 100, ERRORS_EVENTS_PER_MINUTE = 30, 60s dedupe window).
+POSTHOG_ERRORS_BUCKET_CAPACITY = 100
+POSTHOG_ERRORS_REFILL_PER_SECOND = 30 / 60
 POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS = 60.0
 _MAX_TRACKED_FINGERPRINTS = 512
 _DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
@@ -60,7 +61,8 @@ class LoggerConfig:
 
 class LoggerGuard:
     """Returned by :func:`init_logger`. Call :meth:`flush` (or rely on the
-    ``atexit`` hook) to drain Sentry before the process exits.
+    ``atexit`` hook) to drain Sentry and the PostHog errors client before the
+    process exits.
     """
 
     def __init__(
@@ -117,8 +119,10 @@ class _PosthogErrorHandler(logging.Handler):
 
     Records with ``exc_info`` go through ``capture_exception``; the rest become
     a synthesized ``$exception`` event fingerprinted by logger name and
-    unformatted message template. A same-fingerprint dedupe window and a token
-    bucket bound the volume so an error loop cannot flood the project.
+    unformatted message template, joined with ``:`` into the single string
+    PostHog expects for ``$exception_fingerprint``. A same-fingerprint dedupe
+    window and a token bucket bound the volume so an error loop cannot flood
+    the project.
     """
 
     def __init__(
@@ -165,8 +169,8 @@ class _PosthogErrorHandler(logging.Handler):
         if getattr(self._guard, "active", False):
             return
         exc_type = record.exc_info[0] if record.exc_info else None
-        template = str(record.msg)
-        if not self._admit((record.name, template, exc_type)):
+        fingerprint = f"{record.name}:{record.msg}"
+        if not self._admit((fingerprint, exc_type)):
             return
         props = {
             key: getattr(record, key, "")
@@ -188,7 +192,7 @@ class _PosthogErrorHandler(logging.Handler):
                         "mechanism": {"handled": True, "type": "logging"},
                     }
                 ]
-                props["$exception_fingerprint"] = [record.name, template]
+                props["$exception_fingerprint"] = fingerprint
                 self._client.capture(
                     "$exception", distinct_id=distinct_id, properties=props
                 )
@@ -207,16 +211,28 @@ def _build_posthog_handler() -> Optional[_PosthogErrorHandler]:
         return None
     try:
         from posthog import Posthog
+
+        host = os.environ.get("POSTHOG_HOST") or _DEFAULT_POSTHOG_HOST
+        client = Posthog(api_key, host=host)
     except ImportError:
         logging.getLogger(__name__).warning(
             "POSTHOG_ERRORS_API_KEY is set but the posthog extra is not installed"
         )
         return None
-    host = os.environ.get("POSTHOG_HOST") or _DEFAULT_POSTHOG_HOST
-    return _PosthogErrorHandler(Posthog(api_key, host=host))
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "POSTHOG_ERRORS_API_KEY is set but the PostHog client could not be "
+            "created; PostHog error tracking is off",
+            exc_info=True,
+        )
+        return None
+    return _PosthogErrorHandler(client)
 
 
 _INITIALIZED = False
+# The PostHog client installed by the first init_logger call, so later guards
+# can drain it too.
+_POSTHOG_CLIENT: Any = None
 
 
 def init_logger(
@@ -231,7 +247,7 @@ def init_logger(
     handlers.
     """
 
-    global _INITIALIZED
+    global _INITIALIZED, _POSTHOG_CLIENT
 
     rid = run_id or str(uuid.uuid4())
     dsn = sentry_dsn if sentry_dsn is not None else os.environ.get("SENTRY_DSN")
@@ -282,26 +298,27 @@ def init_logger(
             posthog_handler.addFilter(_ContextFilter(repo, tool, rid))
             root.addHandler(posthog_handler)
 
-        guard = LoggerGuard(
-            rid,
-            sentry_enabled,
-            posthog_handler._client if posthog_handler is not None else None,
+        _POSTHOG_CLIENT = (
+            posthog_handler._client if posthog_handler is not None else None
         )
+        guard = LoggerGuard(rid, sentry_enabled, _POSTHOG_CLIENT)
         atexit.register(guard.flush)
         _INITIALIZED = True
         return guard
 
-    # Already initialized: reset the context filter on existing handlers so
-    # the new repo/tool/run_id apply going forward.
+    # Already initialized: swap the context filter on the handlers this module
+    # installed (the ones carrying a _ContextFilter) so the new
+    # repo/tool/run_id apply going forward. Other handlers are left alone.
     new_filter = _ContextFilter(repo, tool, rid)
     for handler in logging.getLogger().handlers:
-        # Drop any prior _ContextFilter to avoid duplicate-tag injection.
-        for existing in list(handler.filters):
-            if isinstance(existing, _ContextFilter):
-                handler.removeFilter(existing)
+        existing = [f for f in handler.filters if isinstance(f, _ContextFilter)]
+        if not existing:
+            continue
+        for old in existing:
+            handler.removeFilter(old)
         handler.addFilter(new_filter)
 
-    return LoggerGuard(rid, sentry_enabled)
+    return LoggerGuard(rid, sentry_enabled, _POSTHOG_CLIENT)
 
 
 __all__ = ["LoggerConfig", "LoggerGuard", "init_logger"]
