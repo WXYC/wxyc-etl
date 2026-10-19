@@ -767,6 +767,26 @@ def test_logged_then_raised_exception_is_sent_once(monkeypatch):
     previous.assert_called_once()
 
 
+def test_retry_loop_logged_dedupe_suppressed_then_raised_sends_the_crash(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    log = logging.getLogger("etl.retry")
+    exc_info = None
+    for attempt in range(3):
+        try:
+            raise ValueError("kaboom")
+        except ValueError:
+            log.exception("attempt failed")  # tries 2 and 3 are dedupe-suppressed
+            exc_info = sys.exc_info()
+
+    assert client.capture_exception.call_count == 1  # only the first try was sent
+    sys.excepthook(*exc_info)
+
+    assert client.capture_exception.call_count == 2
+    _, kwargs = client.capture_exception.call_args
+    assert kwargs["_capture_metadata"]["mechanism"]["handled"] is False
+    previous.assert_called_once()
+
+
 def test_raised_alone_exception_is_sent_once(monkeypatch):
     client, _ = _init_with_hook(monkeypatch)
     exc_info = _exc_info()
