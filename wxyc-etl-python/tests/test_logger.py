@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import sys
 
 import pytest
 
@@ -47,7 +48,6 @@ def test_init_without_dsn_returns_guard(monkeypatch):
 
     assert isinstance(guard, LoggerGuard)
     assert guard.run_id  # generated UUID
-    assert guard.sentry_enabled is False
 
     logging.getLogger("wxyc.test").info("hello", extra={"step": "load"})
 
@@ -91,8 +91,14 @@ def test_step_defaults_to_empty_when_missing(monkeypatch):
     assert payload["step"] == ""
 
 
-def test_init_with_empty_dsn_does_not_enable_sentry(monkeypatch):
-    monkeypatch.setenv("SENTRY_DSN", "")
+@pytest.mark.parametrize("dsn", ["", "https://key@o0.ingest.sentry.io/1"])
+def test_sentry_dsn_is_accepted_and_ignored(monkeypatch, dsn):
+    """``sentry_dsn`` stays in the signature for callers that still pass it,
+    but sentry_sdk is never imported."""
+
+    monkeypatch.setitem(sys.modules, "sentry_sdk", None)
+    monkeypatch.setenv("SENTRY_DSN", dsn)
     _capture_handler_output(monkeypatch)
-    guard = init_logger(repo="r", tool="t")
-    assert guard.sentry_enabled is False
+    guard = init_logger(repo="r", tool="t", sentry_dsn=dsn)
+    assert isinstance(guard, LoggerGuard)
+    guard.flush()
