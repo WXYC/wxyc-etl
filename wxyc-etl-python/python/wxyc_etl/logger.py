@@ -146,6 +146,9 @@ class _ContextFilter(logging.Filter):
         return True
 
 
+_CAPTURED_ATTR = "_wxyc_etl_posthog_captured"
+
+
 class _PosthogErrorHandler(logging.Handler):
     """Send ERROR records to PostHog error tracking.
 
@@ -206,6 +209,11 @@ class _PosthogErrorHandler(logging.Handler):
         if getattr(self._guard, "active", False):
             return
         exc_type = record.exc_info[0] if record.exc_info else None
+        if record.exc_info and record.exc_info[1] is not None:
+            try:  # lets the excepthooks skip an exception that was logged first
+                setattr(record.exc_info[1], _CAPTURED_ATTR, True)
+            except Exception:
+                pass
         fingerprint = f"{record.name}:{record.msg}"
         if not self._admit((fingerprint, exc_type)):
             return
@@ -221,8 +229,12 @@ class _PosthogErrorHandler(logging.Handler):
             if record.exc_info and record.exc_info[0] is not None:
                 if self._set_exception_level:
                     props["$exception_level"] = "error"
+                extra = {}
+                mechanism = getattr(record, "mechanism", None)
+                if mechanism:  # read by posthog-python 7.x; older SDKs ignore it
+                    extra["_capture_metadata"] = {"mechanism": mechanism}
                 self._client.capture_exception(
-                    record.exc_info, distinct_id=distinct_id, properties=props
+                    record.exc_info, distinct_id=distinct_id, properties=props, **extra
                 )
             else:
                 props["$exception_list"] = [
@@ -247,28 +259,44 @@ class _PosthogErrorHandler(logging.Handler):
             self._guard.active = False
 
 
-def _install_excepthook(handler: _PosthogErrorHandler) -> None:
-    """Chain ``sys.excepthook`` so an uncaught exception goes through the
-    handler's dedupe window and token bucket, then the client is flushed and
-    the previous hook runs. ``KeyboardInterrupt`` and ``SystemExit`` are not
-    reported."""
+def _install_excepthooks(handler: _PosthogErrorHandler) -> None:
+    """Chain ``sys.excepthook`` and ``threading.excepthook`` so an uncaught
+    exception goes through the handler's dedupe window and token bucket, the
+    client is flushed, and the previous hook always runs. Crashes are sent
+    with ``mechanism.handled=false``. An exception the handler already
+    captured from a log record is not sent twice. ``KeyboardInterrupt`` and
+    ``SystemExit`` (``SystemExit`` only in threads) are not reported."""
 
-    previous = sys.excepthook
+    def report(exc_type, exc, tb, mechanism_type, skip, previous, *previous_args):
+        try:
+            if not issubclass(exc_type, skip):
+                try:
+                    if not getattr(exc, _CAPTURED_ATTR, False):
+                        record = logging.LogRecord(
+                            "uncaught", logging.ERROR, __file__, 0,
+                            "uncaught exception", (), (exc_type, exc, tb),
+                        )
+                        record.mechanism = {"type": mechanism_type, "handled": False}
+                        handler.handle(record)
+                    handler._client.flush()
+                except Exception:
+                    pass  # error reporting must never mask the original traceback
+        finally:
+            previous(*previous_args)
 
-    def hook(exc_type, exc, tb):
-        if not issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
-            try:
-                record = logging.LogRecord(
-                    "uncaught", logging.ERROR, __file__, 0,
-                    "uncaught exception", (), (exc_type, exc, tb),
-                )
-                handler.handle(record)
-                handler._client.flush()
-            except Exception:
-                pass  # error reporting must never mask the original traceback
-        previous(exc_type, exc, tb)
+    previous_sys = sys.excepthook
+    previous_thread = threading.excepthook
 
-    sys.excepthook = hook
+    def sys_hook(exc_type, exc, tb):
+        report(exc_type, exc, tb, "excepthook", (KeyboardInterrupt, SystemExit),
+               previous_sys, exc_type, exc, tb)
+
+    def thread_hook(args):
+        report(args.exc_type, args.exc_value, args.exc_traceback,
+               "threading.excepthook", (SystemExit,), previous_thread, args)
+
+    sys.excepthook = sys_hook
+    threading.excepthook = thread_hook
 
 
 def _posthog_older_than_level_support() -> bool:
@@ -383,8 +411,8 @@ def init_logger(
     ``posthog_errors=False`` skips the PostHog errors handler and client, for
     a process that also runs wxyc-fastapi's ``init_error_tracking``. As with
     the other handlers, the first call's choice wins. When the handler is
-    built, ``sys.excepthook`` is also chained so uncaught exceptions are
-    reported through the same gate.
+    built, ``sys.excepthook`` and ``threading.excepthook`` are also chained so
+    uncaught exceptions are reported through the same gate.
 
     ``service`` (default: ``tool`` in kebab-case) is the PostHog ``distinct_id``
     and a tag on every record; ``environment`` defaults to the
@@ -458,7 +486,7 @@ def init_logger(
             _POSTHOG_BUDGET = (posthog_run_ceiling, posthog_daily_ceiling)
             posthog_handler.addFilter(_ContextFilter(repo, tool, rid, svc, env))
             root.addHandler(posthog_handler)
-            _install_excepthook(posthog_handler)
+            _install_excepthooks(posthog_handler)
 
         _POSTHOG_CLIENT = (
             posthog_handler._client if posthog_handler is not None else None

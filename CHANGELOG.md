@@ -2,7 +2,7 @@
 
 ## 0.10.3
 
-- Python logger: when `init_logger` builds the PostHog errors handler it also chains `sys.excepthook`, so an uncaught exception is reported through the handler's dedupe window and token bucket (one gate with handled records), the client is flushed, and the previous hook still runs. `KeyboardInterrupt` and `SystemExit` are not reported. Nothing is installed without the key or the `posthog` extra, or with `posthog_errors=False` (#161).
+- Python logger: when `init_logger` builds the PostHog errors handler it also chains `sys.excepthook` and `threading.excepthook`, so an uncaught exception (including a crashed thread) is reported through the handler's dedupe window and token bucket (one gate with handled records), the client is flushed, and the previous hook always runs, even if the flush is interrupted. Crashes are sent with `mechanism.handled=false` (type `excepthook` or `threading.excepthook`; honoured by posthog-python 7.x, older SDKs record them as handled). An exception already captured from a log record (`log.exception(...)` then `raise`) is not sent a second time. `KeyboardInterrupt` and `SystemExit` are not reported (in threads, only `SystemExit`). Nothing is installed without the key or the `posthog` extra, or with `posthog_errors=False` (#161).
 
 ## 0.10.2
 
