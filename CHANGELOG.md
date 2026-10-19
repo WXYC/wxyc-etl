@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.3
+
+- Python logger: when `init_logger` builds the PostHog errors handler it also chains `sys.excepthook`, so an uncaught exception is reported through the handler's dedupe window and token bucket (one gate with handled records), the client is flushed, and the previous hook still runs. `KeyboardInterrupt` and `SystemExit` are not reported. Nothing is installed without the key or the `posthog` extra, or with `posthog_errors=False` (#161).
+
 ## 0.10.2
 
 - Python logger: the PostHog error-tracking handler now follows the shared error-tracking contract (`patterns/error-tracking.md` in WXYC/wiki). Message-only events use `type: "Message"` with a generic synthetic mechanism and `$exception_level: "error"`; every event carries `service`, `environment` and `logger`; `distinct_id` is the `service` value (#159).

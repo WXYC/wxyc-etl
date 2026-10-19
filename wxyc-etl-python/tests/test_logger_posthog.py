@@ -39,6 +39,7 @@ def _reset_logging(monkeypatch):
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
     saved_level = root.level
+    saved_hook = sys.excepthook
     root.handlers.clear()
     monkeypatch.setattr(mod, "_INITIALIZED", False)
     monkeypatch.setattr(mod, "_POSTHOG_CLIENT", None)
@@ -48,6 +49,7 @@ def _reset_logging(monkeypatch):
 
     root.handlers = saved_handlers
     root.setLevel(saved_level)
+    sys.excepthook = saved_hook
 
 
 def _record(
@@ -609,3 +611,108 @@ def test_no_ceiling_warning_when_first_call_built_no_handler(monkeypatch, caplog
         init_logger(repo="r", tool="t", posthog_run_ceiling=5)
 
     assert not any("ceiling" in r.getMessage() for r in caplog.records)
+
+
+def _init_with_hook(monkeypatch, **kwargs):
+    """Init the logger with a stub previous hook; return (client, previous hook)."""
+
+    previous = MagicMock(name="previous_hook")
+    monkeypatch.setattr(sys, "excepthook", previous)
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+    init_logger(repo="r", tool="t", run_id="run-1", **kwargs)
+    return cls.return_value, previous
+
+
+def test_excepthook_captures_then_flushes_then_chains(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    exc_type, exc, tb = _exc_info()
+
+    sys.excepthook(exc_type, exc, tb)
+
+    assert client.capture_exception.call_count == 1
+    args, kwargs = client.capture_exception.call_args
+    assert args[0] == (exc_type, exc, tb)
+    assert kwargs["distinct_id"] == "t"
+    props = kwargs["properties"]
+    assert (props["repo"], props["tool"], props["run_id"]) == ("r", "t", "run-1")
+    assert (props["service"], props["environment"]) == ("t", "production")
+    assert props["logger"] == "uncaught"
+    assert props["$process_person_profile"] is False
+    client.flush.assert_called_once()
+    previous.assert_called_once_with(exc_type, exc, tb)
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+def test_excepthook_skips_interrupt_and_exit(monkeypatch, exc_type):
+    client, previous = _init_with_hook(monkeypatch)
+
+    sys.excepthook(exc_type, exc_type(), None)
+
+    assert _sent(client) == 0
+    previous.assert_called_once()
+
+
+def test_excepthook_chains_even_when_capture_fails(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    client.capture_exception.side_effect = RuntimeError("down")
+    client.flush.side_effect = RuntimeError("down")
+
+    sys.excepthook(*_exc_info())
+
+    previous.assert_called_once()
+
+
+def test_excepthook_spends_the_same_bucket_as_handled_records(monkeypatch):
+    client, _ = _init_with_hook(monkeypatch)
+    (handler,) = [h for h in logging.getLogger().handlers if isinstance(h, mod._PosthogErrorHandler)]
+    for i in range(mod.POSTHOG_ERRORS_BUCKET_CAPACITY - 1):
+        handler.handle(_record(f"handled {i}"))
+
+    sys.excepthook(*_exc_info())  # spends the last token
+    sys.excepthook(RuntimeError, RuntimeError("other"), None)  # 11th distinct event
+
+    assert _sent(client) == mod.POSTHOG_ERRORS_BUCKET_CAPACITY
+
+
+def test_excepthook_is_not_installed_without_key(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(sys, "excepthook", previous)
+
+    init_logger(repo="r", tool="t")
+
+    assert sys.excepthook is previous
+
+
+def test_excepthook_is_not_installed_without_extra(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(sys, "excepthook", previous)
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    monkeypatch.setitem(sys.modules, "posthog", None)
+
+    init_logger(repo="r", tool="t")
+
+    assert sys.excepthook is previous
+
+
+def test_excepthook_is_not_installed_when_posthog_errors_is_off(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(sys, "excepthook", previous)
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    _stub_posthog(monkeypatch)
+
+    init_logger(repo="r", tool="t", posthog_errors=False)
+
+    assert sys.excepthook is previous
+
+
+def test_excepthook_is_installed_once_per_process(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    hook = sys.excepthook
+
+    init_logger(repo="r2", tool="t2")
+
+    assert sys.excepthook is hook
+    sys.excepthook(*_exc_info())
+    previous.assert_called_once()
+    assert client.capture_exception.call_count == 1
