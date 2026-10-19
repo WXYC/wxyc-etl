@@ -42,6 +42,7 @@ def _reset_logging(monkeypatch):
     root.handlers.clear()
     monkeypatch.setattr(mod, "_INITIALIZED", False)
     monkeypatch.setattr(mod, "_POSTHOG_CLIENT", None)
+    monkeypatch.setattr(mod, "_POSTHOG_BUDGET", None)
 
     yield
 
@@ -593,3 +594,18 @@ def test_later_call_with_different_ceilings_warns(monkeypatch, caplog):
         init_logger(repo="r", tool="t", posthog_run_ceiling=5)
 
     assert any("ceiling" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("first_call", ["posthog_errors_false", "no_api_key"])
+def test_no_ceiling_warning_when_first_call_built_no_handler(monkeypatch, caplog, first_call):
+    _stub_posthog(monkeypatch)
+    if first_call == "posthog_errors_false":
+        monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+        init_logger(repo="r", tool="t", posthog_errors=False, posthog_run_ceiling=2)
+    else:
+        init_logger(repo="r", tool="t", posthog_run_ceiling=2)
+        monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    with caplog.at_level(logging.WARNING, logger="wxyc_etl.logger"):
+        init_logger(repo="r", tool="t", posthog_run_ceiling=5)
+
+    assert not any("ceiling" in r.getMessage() for r in caplog.records)

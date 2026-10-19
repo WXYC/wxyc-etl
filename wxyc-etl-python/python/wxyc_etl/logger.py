@@ -336,7 +336,7 @@ _INITIALIZED = False
 # The PostHog client installed by the first init_logger call, so later guards
 # can drain it too.
 _POSTHOG_CLIENT: Any = None
-# The (run, daily) ceilings the first init_logger call built the handler with.
+# The (run, daily) ceilings the handler was built with; None until a handler is built.
 _POSTHOG_BUDGET: Optional[tuple] = None
 
 
@@ -423,13 +423,13 @@ def init_logger(
         root.addHandler(handler)
         root.setLevel(level)
 
-        _POSTHOG_BUDGET = (posthog_run_ceiling, posthog_daily_ceiling)
         posthog_handler = (
             _build_posthog_handler(posthog_run_ceiling, posthog_daily_ceiling)
             if posthog_errors
             else None
         )
         if posthog_handler is not None:
+            _POSTHOG_BUDGET = (posthog_run_ceiling, posthog_daily_ceiling)
             posthog_handler.addFilter(_ContextFilter(repo, tool, rid, svc, env))
             root.addHandler(posthog_handler)
 
@@ -441,7 +441,11 @@ def init_logger(
         _INITIALIZED = True
         return guard
 
-    if posthog_errors and _POSTHOG_BUDGET != (posthog_run_ceiling, posthog_daily_ceiling):
+    if (
+        posthog_errors
+        and _POSTHOG_BUDGET is not None
+        and _POSTHOG_BUDGET != (posthog_run_ceiling, posthog_daily_ceiling)
+    ):
         logging.getLogger(__name__).warning(
             "init_logger was already called with PostHog ceilings %r; ignoring "
             "run/daily ceilings (%r, %r) because the handler is built once",
