@@ -37,10 +37,17 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-# Backstop constants, kept in step with wxyc-fastapi's ERROR-to-PostHog handler
-# (ERRORS_BURST = 100, ERRORS_EVENTS_PER_MINUTE = 30, 60s dedupe window).
-POSTHOG_ERRORS_BUCKET_CAPACITY = 100
-POSTHOG_ERRORS_REFILL_PER_SECOND = 30 / 60
+# Budget from the error-tracking contract (WXYC/wiki patterns/error-tracking.md,
+# section 5). A scheduled run gets a fixed per-run ceiling and no refill; a
+# long-running process gets a small burst plus a refill that spends a daily
+# ceiling.
+POSTHOG_ERRORS_BUCKET_CAPACITY = 10
+POSTHOG_ERRORS_REFILL_PER_SECOND = 0.0
+POSTHOG_ERRORS_LONG_RUNNING_CAPACITY = 20
+_SECONDS_PER_DAY = 86400
+# posthog 7.65.0+ sets $exception_level itself and warns when it is overridden.
+_POSTHOG_SETS_LEVEL_FROM = (7, 65, 0)
+_DEFAULT_ENVIRONMENT = "production"
 POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS = 60.0
 _MAX_TRACKED_FINGERPRINTS = 512
 _DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
@@ -57,6 +64,10 @@ class LoggerConfig:
     tool: str
     sentry_dsn: Optional[str] = None
     run_id: Optional[str] = None
+    service: Optional[str] = None
+    environment: Optional[str] = None
+    posthog_run_ceiling: int = POSTHOG_ERRORS_BUCKET_CAPACITY
+    posthog_daily_ceiling: Optional[int] = None
 
 
 class LoggerGuard:
@@ -91,16 +102,20 @@ class LoggerGuard:
 
 
 class _ContextFilter(logging.Filter):
-    """Inject repo/tool/run_id onto every record so the JSON formatter emits
+    """Inject repo/tool/run_id/service/environment onto every record so the JSON formatter emits
     them. Per-event ``step`` is supplied by callers via ``extra={"step": ...}``
     and survives this filter unchanged.
     """
 
-    def __init__(self, repo: str, tool: str, run_id: str) -> None:
+    def __init__(
+        self, repo: str, tool: str, run_id: str, service: str, environment: str
+    ) -> None:
         super().__init__()
         self._repo = repo
         self._tool = tool
         self._run_id = run_id
+        self._service = service
+        self._environment = environment
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not hasattr(record, "repo"):
@@ -109,6 +124,10 @@ class _ContextFilter(logging.Filter):
             record.tool = self._tool
         if not hasattr(record, "run_id"):
             record.run_id = self._run_id
+        if not hasattr(record, "service"):
+            record.service = self._service
+        if not hasattr(record, "environment"):
+            record.environment = self._environment
         if not hasattr(record, "step"):
             record.step = ""
         return True
@@ -120,9 +139,12 @@ class _PosthogErrorHandler(logging.Handler):
     Records with ``exc_info`` go through ``capture_exception``; the rest become
     a synthesized ``$exception`` event fingerprinted by logger name and
     unformatted message template, joined with ``:`` into the single string
-    PostHog expects for ``$exception_fingerprint``. A same-fingerprint dedupe
-    window and a token bucket bound the volume so an error loop cannot flood
-    the project.
+    PostHog expects for ``$exception_fingerprint``. Events follow the
+    error-tracking contract: ``distinct_id`` is the ``service`` value and every
+    event carries ``service``, ``environment`` and ``logger``. A same-fingerprint
+    dedupe window and a token bucket bound the volume so an error loop cannot
+    flood the project. ``set_exception_level`` adds ``$exception_level`` to
+    ``capture_exception`` calls, for posthog SDKs older than 7.65.0.
     """
 
     def __init__(
@@ -132,6 +154,7 @@ class _PosthogErrorHandler(logging.Handler):
         capacity: float = POSTHOG_ERRORS_BUCKET_CAPACITY,
         refill_per_second: float = POSTHOG_ERRORS_REFILL_PER_SECOND,
         dedupe_window: float = POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS,
+        set_exception_level: bool = False,
     ) -> None:
         super().__init__(level=logging.ERROR)
         self._client = client
@@ -139,6 +162,7 @@ class _PosthogErrorHandler(logging.Handler):
         self._capacity = capacity
         self._refill = refill_per_second
         self._window = dedupe_window
+        self._set_exception_level = set_exception_level
         self._tokens = float(capacity)
         self._last_refill = clock()
         self._seen: dict[tuple, float] = {}
@@ -174,24 +198,32 @@ class _PosthogErrorHandler(logging.Handler):
             return
         props = {
             key: getattr(record, key, "")
-            for key in ("repo", "tool", "run_id", "step")
+            for key in ("repo", "tool", "run_id", "step", "service", "environment")
         }
+        props["logger"] = record.name
         props["$process_person_profile"] = False
-        distinct_id = props["run_id"] or record.name
+        distinct_id = props["service"]
         self._guard.active = True
         try:
             if record.exc_info and record.exc_info[0] is not None:
+                if self._set_exception_level:
+                    props["$exception_level"] = "error"
                 self._client.capture_exception(
                     record.exc_info, distinct_id=distinct_id, properties=props
                 )
             else:
                 props["$exception_list"] = [
                     {
-                        "type": record.name,
+                        "type": "Message",
                         "value": record.getMessage(),
-                        "mechanism": {"handled": True, "type": "logging"},
+                        "mechanism": {
+                            "type": "generic",
+                            "handled": True,
+                            "synthetic": True,
+                        },
                     }
                 ]
+                props["$exception_level"] = "error"
                 props["$exception_fingerprint"] = fingerprint
                 self._client.capture(
                     "$exception", distinct_id=distinct_id, properties=props
@@ -202,9 +234,27 @@ class _PosthogErrorHandler(logging.Handler):
             self._guard.active = False
 
 
-def _build_posthog_handler() -> Optional[_PosthogErrorHandler]:
+def _posthog_older_than_level_support() -> bool:
+    """True when the installed posthog predates 7.65.0 (or its version cannot
+    be read), so the handler must set ``$exception_level`` itself."""
+
+    try:
+        from importlib.metadata import version
+
+        parts = tuple(int(p) for p in version("posthog").split(".")[:3])
+    except Exception:
+        return True
+    return parts < _POSTHOG_SETS_LEVEL_FROM
+
+
+def _build_posthog_handler(
+    run_ceiling: int = POSTHOG_ERRORS_BUCKET_CAPACITY,
+    daily_ceiling: Optional[int] = None,
+) -> Optional[_PosthogErrorHandler]:
     """Return a handler when ``POSTHOG_ERRORS_API_KEY`` is set and the optional
-    ``posthog`` extra imports; otherwise ``None`` (fail-open)."""
+    ``posthog`` extra imports; otherwise ``None`` (fail-open). ``daily_ceiling``
+    selects the long-running bucket; otherwise ``run_ceiling`` is a fixed
+    per-run budget."""
 
     api_key = os.environ.get("POSTHOG_ERRORS_API_KEY")
     if not api_key:
@@ -226,7 +276,17 @@ def _build_posthog_handler() -> Optional[_PosthogErrorHandler]:
             exc_info=True,
         )
         return None
-    return _PosthogErrorHandler(client)
+    if daily_ceiling is not None:
+        capacity = POSTHOG_ERRORS_LONG_RUNNING_CAPACITY
+        refill = daily_ceiling / _SECONDS_PER_DAY
+    else:
+        capacity, refill = run_ceiling, POSTHOG_ERRORS_REFILL_PER_SECOND
+    return _PosthogErrorHandler(
+        client,
+        capacity=capacity,
+        refill_per_second=refill,
+        set_exception_level=_posthog_older_than_level_support(),
+    )
 
 
 _INITIALIZED = False
@@ -242,6 +302,10 @@ def init_logger(
     run_id: Optional[str] = None,
     level: int = logging.INFO,
     posthog_errors: bool = True,
+    service: Optional[str] = None,
+    environment: Optional[str] = None,
+    posthog_run_ceiling: int = POSTHOG_ERRORS_BUCKET_CAPACITY,
+    posthog_daily_ceiling: Optional[int] = None,
 ) -> LoggerGuard:
     """Initialize Sentry (when DSN is available) and JSON logging on the root
     logger. Idempotent: subsequent calls update tags but don't double-install
@@ -250,6 +314,14 @@ def init_logger(
     ``posthog_errors=False`` skips the PostHog errors handler and client, for
     a process that also runs wxyc-fastapi's ``init_error_tracking``. As with
     the other handlers, the first call's choice wins.
+
+    ``service`` (default: ``tool`` in kebab-case) is the PostHog ``distinct_id``
+    and a tag on every record; ``environment`` defaults to the
+    ``WXYC_ENVIRONMENT`` env var, else ``production``. The PostHog budget
+    defaults to a scheduled run: ``posthog_run_ceiling`` events (10; pass 2 for
+    a job that runs more than 4 times a day) and no refill. A long-running
+    process must pass ``posthog_daily_ceiling`` instead, which selects a
+    capacity-20 bucket refilling at ceiling / 86,400 per second.
     """
 
     global _INITIALIZED, _POSTHOG_CLIENT
@@ -257,6 +329,8 @@ def init_logger(
     rid = run_id or str(uuid.uuid4())
     dsn = sentry_dsn if sentry_dsn is not None else os.environ.get("SENTRY_DSN")
     sentry_enabled = bool(dsn)
+    svc = service or "-".join(tool.lower().split())
+    env = environment or os.environ.get("WXYC_ENVIRONMENT") or _DEFAULT_ENVIRONMENT
 
     if sentry_enabled:
         import sentry_sdk
@@ -286,21 +360,25 @@ def init_logger(
 
         formatter = JsonFormatter(
             "%(asctime)s %(levelname)s %(name)s %(message)s "
-            "%(repo)s %(tool)s %(step)s %(run_id)s",
+            "%(repo)s %(tool)s %(step)s %(run_id)s %(service)s %(environment)s",
             rename_fields={"asctime": "timestamp", "levelname": "level"},
         )
 
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(formatter)
-        handler.addFilter(_ContextFilter(repo, tool, rid))
+        handler.addFilter(_ContextFilter(repo, tool, rid, svc, env))
 
         root = logging.getLogger()
         root.addHandler(handler)
         root.setLevel(level)
 
-        posthog_handler = _build_posthog_handler() if posthog_errors else None
+        posthog_handler = (
+            _build_posthog_handler(posthog_run_ceiling, posthog_daily_ceiling)
+            if posthog_errors
+            else None
+        )
         if posthog_handler is not None:
-            posthog_handler.addFilter(_ContextFilter(repo, tool, rid))
+            posthog_handler.addFilter(_ContextFilter(repo, tool, rid, svc, env))
             root.addHandler(posthog_handler)
 
         _POSTHOG_CLIENT = (
@@ -314,7 +392,7 @@ def init_logger(
     # Already initialized: swap the context filter on the handlers this module
     # installed (the ones carrying a _ContextFilter) so the new
     # repo/tool/run_id apply going forward. Other handlers are left alone.
-    new_filter = _ContextFilter(repo, tool, rid)
+    new_filter = _ContextFilter(repo, tool, rid, svc, env)
     for handler in logging.getLogger().handlers:
         existing = [f for f in handler.filters if isinstance(f, _ContextFilter)]
         if not existing:
