@@ -241,10 +241,15 @@ def init_logger(
     sentry_dsn: Optional[str] = None,
     run_id: Optional[str] = None,
     level: int = logging.INFO,
+    posthog_errors: bool = True,
 ) -> LoggerGuard:
     """Initialize Sentry (when DSN is available) and JSON logging on the root
     logger. Idempotent: subsequent calls update tags but don't double-install
     handlers.
+
+    ``posthog_errors=False`` skips the PostHog errors handler and client, for
+    a process that also runs wxyc-fastapi's ``init_error_tracking``. As with
+    the other handlers, the first call's choice wins.
     """
 
     global _INITIALIZED, _POSTHOG_CLIENT
@@ -293,7 +298,7 @@ def init_logger(
         root.addHandler(handler)
         root.setLevel(level)
 
-        posthog_handler = _build_posthog_handler()
+        posthog_handler = _build_posthog_handler() if posthog_errors else None
         if posthog_handler is not None:
             posthog_handler.addFilter(_ContextFilter(repo, tool, rid))
             root.addHandler(posthog_handler)

@@ -376,3 +376,36 @@ def test_repeat_init_leaves_foreign_handlers_alone(monkeypatch):
     init_logger(repo="r2", tool="t2")
 
     assert not any(isinstance(f, mod._ContextFilter) for f in foreign.filters)
+
+
+def test_posthog_errors_false_installs_nothing_and_builds_no_client(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+
+    guard = init_logger(repo="r", tool="t", posthog_errors=False)
+
+    cls.assert_not_called()
+    assert not any(isinstance(h, mod._PosthogErrorHandler) for h in logging.getLogger().handlers)
+    assert guard._posthog_client is None
+    guard.flush()  # nothing to drain; must not raise
+
+
+def test_posthog_errors_defaults_to_on(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+
+    init_logger(repo="r", tool="t")
+
+    cls.assert_called_once()
+
+
+def test_repeat_init_keeps_first_call_choice_to_skip(monkeypatch):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+
+    init_logger(repo="r", tool="t", posthog_errors=False)
+    guard = init_logger(repo="r2", tool="t2")
+
+    cls.assert_not_called()
+    assert not any(isinstance(h, mod._PosthogErrorHandler) for h in logging.getLogger().handlers)
+    assert guard._posthog_client is None
