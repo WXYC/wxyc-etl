@@ -247,6 +247,30 @@ class _PosthogErrorHandler(logging.Handler):
             self._guard.active = False
 
 
+def _install_excepthook(handler: _PosthogErrorHandler) -> None:
+    """Chain ``sys.excepthook`` so an uncaught exception goes through the
+    handler's dedupe window and token bucket, then the client is flushed and
+    the previous hook runs. ``KeyboardInterrupt`` and ``SystemExit`` are not
+    reported."""
+
+    previous = sys.excepthook
+
+    def hook(exc_type, exc, tb):
+        if not issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
+            try:
+                record = logging.LogRecord(
+                    "uncaught", logging.ERROR, __file__, 0,
+                    "uncaught exception", (), (exc_type, exc, tb),
+                )
+                handler.handle(record)
+                handler._client.flush()
+            except Exception:
+                pass  # error reporting must never mask the original traceback
+        previous(exc_type, exc, tb)
+
+    sys.excepthook = hook
+
+
 def _posthog_older_than_level_support() -> bool:
     """True when the installed posthog predates 7.65.0 (or its version cannot
     be read), so the handler must set ``$exception_level`` itself."""
@@ -358,7 +382,9 @@ def init_logger(
 
     ``posthog_errors=False`` skips the PostHog errors handler and client, for
     a process that also runs wxyc-fastapi's ``init_error_tracking``. As with
-    the other handlers, the first call's choice wins.
+    the other handlers, the first call's choice wins. When the handler is
+    built, ``sys.excepthook`` is also chained so uncaught exceptions are
+    reported through the same gate.
 
     ``service`` (default: ``tool`` in kebab-case) is the PostHog ``distinct_id``
     and a tag on every record; ``environment`` defaults to the
@@ -432,6 +458,7 @@ def init_logger(
             _POSTHOG_BUDGET = (posthog_run_ceiling, posthog_daily_ceiling)
             posthog_handler.addFilter(_ContextFilter(repo, tool, rid, svc, env))
             root.addHandler(posthog_handler)
+            _install_excepthook(posthog_handler)
 
         _POSTHOG_CLIENT = (
             posthog_handler._client if posthog_handler is not None else None
