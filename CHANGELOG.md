@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- Python logger: removed the `sentry-sdk` dependency and the Sentry initialisation. `sentry_dsn` stays on `init_logger` and `LoggerConfig` as an accepted-and-ignored argument, so callers that still pass it (for example `sentry_dsn=""`) keep working. `LoggerGuard.sentry_enabled` is gone, and `SENTRY_DSN` is no longer read by the Python logger. Errors go to PostHog through `POSTHOG_ERRORS_API_KEY` (#154).
+
 ## 0.10.3
 
 - Python logger: when `init_logger` builds the PostHog errors handler it also chains `sys.excepthook` and `threading.excepthook`, so an uncaught exception (including a crashed thread) is reported through the handler's dedupe window and token bucket (one gate with handled records), the client is flushed, and the previous hook always runs, even if the flush is interrupted. Crashes are sent with `mechanism.handled=false` (type `excepthook` or `threading.excepthook`; the private `_capture_metadata` kwarg first appears in posthog-python 7.65.0; versions 6.9 through 7.64 ignore it and send the crash as handled). An exception already captured from a log record (`log.exception(...)` then `raise`) is not sent a second time. `KeyboardInterrupt` and `SystemExit` are not reported (in threads, only `SystemExit`). Nothing is installed without the key or the `posthog` extra, or with `posthog_errors=False` (#161).

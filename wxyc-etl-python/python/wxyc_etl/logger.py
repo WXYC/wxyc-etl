@@ -1,15 +1,14 @@
-"""Sentry + structured JSON logging for WXYC ETL pipelines (Python side).
+"""Structured JSON logging for WXYC ETL pipelines (Python side).
 
 Mirrors :mod:`wxyc_etl::logger` (Rust). Every Python ETL should call
 :func:`init_logger` once at startup with a ``repo`` and ``tool`` identifying
 the pipeline. Logs emit one JSON object per line on the root logger with the
 tags ``repo``, ``tool``, ``step``, and ``run_id`` (``step`` is set per-call via
 :func:`logging.Logger.info` ``extra=`` or via :class:`LoggerStep`). When
-``SENTRY_DSN`` is set in the environment (or supplied to :func:`init_logger`)
-unhandled exceptions and ``logger.error`` events are forwarded to Sentry with
-the same tags. When ``POSTHOG_ERRORS_API_KEY`` is set and the optional
-``posthog`` extra is installed, ERROR records are also sent to PostHog error
-tracking (see :class:`_PosthogErrorHandler`); Sentry keeps working alongside.
+``POSTHOG_ERRORS_API_KEY`` is set and the optional ``posthog`` extra is
+installed, ERROR records are also sent to PostHog error tracking (see
+:class:`_PosthogErrorHandler`). ``sentry_dsn`` is still accepted for callers
+that pass it, but is ignored.
 
 Usage::
 
@@ -21,7 +20,7 @@ Usage::
     log = logging.getLogger(__name__)
     log.info("loaded recordings", extra={"step": "import", "rows": 42})
 
-The returned :class:`LoggerGuard` flushes pending Sentry and PostHog events
+The returned :class:`LoggerGuard` flushes pending PostHog events
 when its ``flush`` method is called (or when the program exits).
 """
 
@@ -70,8 +69,8 @@ _POSTHOG_SKIP_LOGGERS = ("posthog", "backoff", "wxyc_etl")
 
 @dataclass(frozen=True)
 class LoggerConfig:
-    """Configuration for :func:`init_logger`. ``sentry_dsn=None`` falls back to
-    the ``SENTRY_DSN`` env var; ``run_id=None`` generates a UUIDv4."""
+    """Configuration for :func:`init_logger`. ``sentry_dsn`` is accepted and
+    ignored; ``run_id=None`` generates a UUIDv4."""
 
     repo: str
     tool: str
@@ -85,15 +84,12 @@ class LoggerConfig:
 
 class LoggerGuard:
     """Returned by :func:`init_logger`. Call :meth:`flush` (or rely on the
-    ``atexit`` hook) to drain Sentry and the PostHog errors client before the
-    process exits.
+    ``atexit`` hook) to drain the PostHog errors client before the process
+    exits.
     """
 
-    def __init__(
-        self, run_id: str, sentry_enabled: bool, posthog_client: Any = None
-    ) -> None:
+    def __init__(self, run_id: str, posthog_client: Any = None) -> None:
         self.run_id = run_id
-        self.sentry_enabled = sentry_enabled
         self._posthog_client = posthog_client
 
     def flush(self, timeout: float = 2.0) -> None:
@@ -102,16 +98,6 @@ class LoggerGuard:
                 self._posthog_client.flush()
             except Exception:  # pragma: no cover - flush is best-effort
                 pass
-        if not self.sentry_enabled:
-            return
-        try:
-            import sentry_sdk
-
-            client = sentry_sdk.Hub.current.client
-            if client is not None:
-                client.flush(timeout=timeout)
-        except Exception:  # pragma: no cover - flush is best-effort
-            pass
 
 
 class _ContextFilter(logging.Filter):
@@ -409,9 +395,9 @@ def init_logger(
     posthog_run_ceiling: int = POSTHOG_ERRORS_BUCKET_CAPACITY,
     posthog_daily_ceiling: Optional[int] = None,
 ) -> LoggerGuard:
-    """Initialize Sentry (when DSN is available) and JSON logging on the root
-    logger. Idempotent: subsequent calls update tags but don't double-install
-    handlers.
+    """Initialize JSON logging on the root logger. Idempotent: subsequent calls
+    update tags but don't double-install handlers. ``sentry_dsn`` is accepted
+    for backward compatibility and ignored.
 
     ``posthog_errors=False`` skips the PostHog errors handler and client, for
     a process that also runs wxyc-fastapi's ``init_error_tracking``. As with
@@ -435,24 +421,10 @@ def init_logger(
     global _INITIALIZED, _POSTHOG_CLIENT, _POSTHOG_BUDGET
 
     rid = run_id or str(uuid.uuid4())
-    dsn = sentry_dsn if sentry_dsn is not None else os.environ.get("SENTRY_DSN")
-    sentry_enabled = bool(dsn)
     svc = service or "-".join(tool.lower().split())
     env = _normalize_environment(
         environment or os.environ.get("WXYC_ENVIRONMENT") or _DEFAULT_ENVIRONMENT
     )
-
-    if sentry_enabled:
-        import sentry_sdk
-
-        sentry_sdk.init(
-            dsn=dsn,
-            traces_sample_rate=0.0,
-            attach_stacktrace=True,
-        )
-        sentry_sdk.set_tag("repo", repo)
-        sentry_sdk.set_tag("tool", tool)
-        sentry_sdk.set_tag("run_id", rid)
 
     if not _INITIALIZED:
         try:
@@ -496,7 +468,7 @@ def init_logger(
         _POSTHOG_CLIENT = (
             posthog_handler._client if posthog_handler is not None else None
         )
-        guard = LoggerGuard(rid, sentry_enabled, _POSTHOG_CLIENT)
+        guard = LoggerGuard(rid, _POSTHOG_CLIENT)
         atexit.register(guard.flush)
         _INITIALIZED = True
         return guard
@@ -526,7 +498,7 @@ def init_logger(
             handler.removeFilter(old)
         handler.addFilter(new_filter)
 
-    return LoggerGuard(rid, sentry_enabled, _POSTHOG_CLIENT)
+    return LoggerGuard(rid, _POSTHOG_CLIENT)
 
 
 __all__ = ["LoggerConfig", "LoggerGuard", "init_logger"]

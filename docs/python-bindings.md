@@ -7,7 +7,7 @@ wxyc-etl-python/
   src/                  # Rust extension, built as wxyc_etl._native
   python/wxyc_etl/      # pure-Python helpers
     __init__.py         # re-exports the Rust submodules
-    logger.py           # Sentry + JSON logging (pure Python)
+    logger.py           # JSON logging + PostHog error tracking (pure Python)
 ```
 
 `pyproject.toml` has `python-source = "python"` and `module-name = "wxyc_etl._native"` so maturin packs both halves into a single `wxyc_etl` package. The Rust crate registers its submodules under `wxyc_etl.<name>` in `sys.modules` so consumers can use either `from wxyc_etl.text import ...` or `from wxyc_etl import text`. Pure-Python additions go in `python/wxyc_etl/*.py`.
