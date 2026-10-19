@@ -40,6 +40,7 @@ def _reset_logging(monkeypatch):
     saved_handlers = root.handlers[:]
     saved_level = root.level
     saved_hook = sys.excepthook
+    saved_thread_hook = threading.excepthook
     root.handlers.clear()
     monkeypatch.setattr(mod, "_INITIALIZED", False)
     monkeypatch.setattr(mod, "_POSTHOG_CLIENT", None)
@@ -50,6 +51,7 @@ def _reset_logging(monkeypatch):
     root.handlers = saved_handlers
     root.setLevel(saved_level)
     sys.excepthook = saved_hook
+    threading.excepthook = saved_thread_hook
 
 
 def _record(
@@ -624,12 +626,26 @@ def _init_with_hook(monkeypatch, **kwargs):
     return cls.return_value, previous
 
 
+def _recorder(client, previous, thread_previous=None):
+    """Record the order of capture, flush and the previous hook(s)."""
+
+    order: list[str] = []
+    client.capture_exception.side_effect = lambda *a, **k: order.append("capture")
+    client.flush.side_effect = lambda *a, **k: order.append("flush")
+    previous.side_effect = lambda *a, **k: order.append("previous")
+    if thread_previous is not None:
+        thread_previous.side_effect = lambda *a, **k: order.append("previous")
+    return order
+
+
 def test_excepthook_captures_then_flushes_then_chains(monkeypatch):
     client, previous = _init_with_hook(monkeypatch)
     exc_type, exc, tb = _exc_info()
+    order = _recorder(client, previous)
 
     sys.excepthook(exc_type, exc, tb)
 
+    assert order == ["capture", "flush", "previous"]
     assert client.capture_exception.call_count == 1
     args, kwargs = client.capture_exception.call_args
     assert args[0] == (exc_type, exc, tb)
@@ -639,6 +655,9 @@ def test_excepthook_captures_then_flushes_then_chains(monkeypatch):
     assert (props["service"], props["environment"]) == ("t", "production")
     assert props["logger"] == "uncaught"
     assert props["$process_person_profile"] is False
+    assert kwargs["_capture_metadata"] == {
+        "mechanism": {"type": "excepthook", "handled": False}
+    }
     client.flush.assert_called_once()
     previous.assert_called_once_with(exc_type, exc, tb)
 
@@ -716,3 +735,119 @@ def test_excepthook_is_installed_once_per_process(monkeypatch):
     sys.excepthook(*_exc_info())
     previous.assert_called_once()
     assert client.capture_exception.call_count == 1
+
+
+def test_excepthook_chains_when_flush_is_interrupted(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    client.flush.side_effect = KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        sys.excepthook(*_exc_info())
+
+    previous.assert_called_once()
+    client.flush.side_effect = None  # the atexit flush must not re-raise
+
+
+def test_logged_then_raised_exception_is_sent_once(monkeypatch):
+    client, previous = _init_with_hook(monkeypatch)
+    log = logging.getLogger("etl.dedupe")
+    try:
+        try:
+            raise ValueError("kaboom")
+        except ValueError:
+            log.exception("failed")
+            raise
+    except ValueError:
+        exc_info = sys.exc_info()
+
+    sys.excepthook(*exc_info)
+
+    assert client.capture_exception.call_count == 1
+    client.flush.assert_called_once()
+    previous.assert_called_once()
+
+
+def test_raised_alone_exception_is_sent_once(monkeypatch):
+    client, _ = _init_with_hook(monkeypatch)
+    exc_info = _exc_info()
+
+    sys.excepthook(*exc_info)
+    sys.excepthook(*exc_info)
+
+    assert client.capture_exception.call_count == 1
+
+
+def test_logging_an_exception_without_settable_attributes_still_sends(monkeypatch):
+    class Slotted(Exception):
+        __slots__ = ()
+
+    client, _ = _init_with_hook(monkeypatch)
+    try:
+        raise Slotted("x")
+    except Slotted:
+        logging.getLogger("etl.slots").exception("failed")
+
+    assert client.capture_exception.call_count == 1
+
+
+def _crash_in_thread() -> None:
+    def boom():
+        raise ValueError("thread kaboom")
+
+    thread = threading.Thread(target=boom)
+    thread.start()
+    thread.join()
+
+
+def test_threading_excepthook_captures_flushes_then_chains(monkeypatch):
+    previous = MagicMock(name="previous_thread_hook")
+    monkeypatch.setattr(threading, "excepthook", previous)
+    client, _ = _init_with_hook(monkeypatch)
+    order = _recorder(client, MagicMock(), previous)
+
+    _crash_in_thread()
+
+    assert order == ["capture", "flush", "previous"]
+    args, kwargs = client.capture_exception.call_args
+    assert isinstance(args[0][1], ValueError)
+    assert kwargs["properties"]["logger"] == "uncaught"
+    assert kwargs["_capture_metadata"] == {
+        "mechanism": {"type": "threading.excepthook", "handled": False}
+    }
+    assert previous.call_args.args[0].exc_type is ValueError
+
+
+def test_threading_excepthook_skips_system_exit(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(threading, "excepthook", previous)
+    client, _ = _init_with_hook(monkeypatch)
+
+    def leave():
+        raise SystemExit
+
+    thread = threading.Thread(target=leave)
+    thread.start()
+    thread.join()
+
+    assert _sent(client) == 0
+    previous.assert_called_once()
+
+
+def test_threading_excepthook_is_not_installed_without_key(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(threading, "excepthook", previous)
+
+    init_logger(repo="r", tool="t")
+
+    assert threading.excepthook is previous
+
+
+def test_threading_excepthook_is_installed_once_per_process(monkeypatch):
+    previous = MagicMock()
+    monkeypatch.setattr(threading, "excepthook", previous)
+    client, _ = _init_with_hook(monkeypatch)
+    hook = threading.excepthook
+
+    init_logger(repo="r2", tool="t2")
+
+    assert threading.excepthook is hook
