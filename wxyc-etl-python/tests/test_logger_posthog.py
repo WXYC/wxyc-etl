@@ -59,6 +59,7 @@ def _record(
 ) -> logging.LogRecord:
     record = logging.LogRecord(name, level, __file__, 1, msg, args, exc_info)
     record.repo, record.tool, record.run_id, record.step = "r", "t", "run-1", "import"
+    record.service, record.environment = "r-t", "production"
     return record
 
 
@@ -89,6 +90,22 @@ def test_exc_info_record_goes_through_capture_exception():
     assert kwargs["properties"]["repo"] == "r"
     assert kwargs["properties"]["tool"] == "t"
     assert kwargs["properties"]["run_id"] == "run-1"
+    assert kwargs["distinct_id"] == "r-t"
+    assert kwargs["properties"]["service"] == "r-t"
+    assert kwargs["properties"]["environment"] == "production"
+    assert kwargs["properties"]["logger"] == "etl.lookup"
+    assert kwargs["properties"]["$process_person_profile"] is False
+    assert "$exception_level" not in kwargs["properties"]
+
+
+@pytest.mark.parametrize("set_level", [True, False])
+def test_exception_level_is_set_only_for_old_sdks(set_level):
+    client = MagicMock()
+
+    _handler(client, set_exception_level=set_level).handle(_record(exc_info=_exc_info()))
+
+    props = client.capture_exception.call_args.kwargs["properties"]
+    assert props.get("$exception_level") == ("error" if set_level else None)
 
 
 def test_record_without_exc_info_synthesizes_exception_event():
@@ -102,11 +119,16 @@ def test_record_without_exc_info_synthesizes_exception_event():
     props = kwargs["properties"]
     assert props["$exception_list"] == [
         {
-            "type": "etl.lookup",
+            "type": "Message",
             "value": "lookup failed for Juana Molina",
-            "mechanism": {"handled": True, "type": "logging"},
+            "mechanism": {"type": "generic", "handled": True, "synthetic": True},
         }
     ]
+    assert props["$exception_level"] == "error"
+    assert props["logger"] == "etl.lookup"
+    assert (props["service"], props["environment"]) == ("r-t", "production")
+    assert props["$process_person_profile"] is False
+    assert kwargs["distinct_id"] == "r-t"
     # PostHog types $exception_fingerprint as a single string; a list is dropped.
     assert props["$exception_fingerprint"] == "etl.lookup:lookup failed for %s"
     assert (props["repo"], props["tool"], props["run_id"], props["step"]) == ("r", "t", "run-1", "import")
@@ -310,9 +332,93 @@ def test_dedupe_keys_on_the_joined_fingerprint_string():
     assert _sent(client) == 1
 
 
-def test_backstop_constants_match_wxyc_fastapi():
-    assert mod.POSTHOG_ERRORS_BUCKET_CAPACITY == 100
-    assert mod.POSTHOG_ERRORS_REFILL_PER_SECOND == 30 / 60
+def test_default_bucket_is_a_scheduled_run_budget():
+    assert mod.POSTHOG_ERRORS_BUCKET_CAPACITY == 10
+    assert mod.POSTHOG_ERRORS_REFILL_PER_SECOND == 0
+
+
+@pytest.mark.parametrize("ceiling", [10, 2])
+def test_run_ceiling_drops_the_next_distinct_event(ceiling):
+    client = MagicMock()
+    handler = _handler(client, capacity=ceiling, refill_per_second=0)
+
+    for i in range(ceiling + 1):
+        handler.handle(_record(f"distinct {i}"))
+
+    assert _sent(client) == ceiling
+
+
+def test_repeat_inside_window_costs_no_token():
+    client = MagicMock()
+    handler = _handler(client, capacity=2, refill_per_second=0)
+
+    handler.handle(_record("same"))
+    handler.handle(_record("same"))
+    handler.handle(_record("other"))
+
+    assert _sent(client) == 2
+
+
+def _init_handler(monkeypatch, **kwargs) -> mod._PosthogErrorHandler:
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    _stub_posthog(monkeypatch)
+    init_logger(repo="r", tool="t", **kwargs)
+    (handler,) = [h for h in logging.getLogger().handlers if isinstance(h, mod._PosthogErrorHandler)]
+    return handler
+
+
+def test_init_default_is_scheduled_run_bucket(monkeypatch):
+    handler = _init_handler(monkeypatch)
+    assert (handler._capacity, handler._refill) == (10, 0)
+
+
+def test_init_run_ceiling_sets_capacity(monkeypatch):
+    handler = _init_handler(monkeypatch, posthog_run_ceiling=2)
+    assert (handler._capacity, handler._refill) == (2, 0)
+
+
+def test_init_daily_ceiling_selects_long_running_bucket(monkeypatch):
+    handler = _init_handler(monkeypatch, posthog_daily_ceiling=100)
+    assert handler._capacity == 20
+    assert handler._refill == 100 / 86400
+
+
+def test_long_running_bucket_resumes_after_burst_is_spent():
+    client = MagicMock()
+    clock = FakeClock()
+    handler = _handler(client, clock, capacity=20, refill_per_second=100 / 86400)
+
+    for i in range(21):
+        handler.handle(_record(f"m{i}"))
+    assert _sent(client) == 20
+
+    clock.advance(86400 / 100)  # one token
+    handler.handle(_record("later"))
+    assert _sent(client) == 21
+
+
+@pytest.mark.parametrize(
+    "kwargs,env,expected",
+    [
+        ({}, None, ("t-x-y", "production")),
+        ({}, "staging", ("t-x-y", "staging")),
+        ({"service": "svc", "environment": "dev"}, "staging", ("svc", "dev")),
+    ],
+)
+def test_service_and_environment_reach_the_event(monkeypatch, kwargs, env, expected):
+    if env:
+        monkeypatch.setenv("WXYC_ENVIRONMENT", env)
+    else:
+        monkeypatch.delenv("WXYC_ENVIRONMENT", raising=False)
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+    init_logger(repo="r", tool="T x  y", **kwargs)
+
+    logging.getLogger("etl.lookup").error("lookup failed")
+
+    call = cls.return_value.capture.call_args
+    assert call.kwargs["distinct_id"] == expected[0]
+    assert (call.kwargs["properties"]["service"], call.kwargs["properties"]["environment"]) == expected
 
 
 def test_concurrent_logging_respects_bucket():
