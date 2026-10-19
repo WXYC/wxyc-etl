@@ -209,12 +209,11 @@ class _PosthogErrorHandler(logging.Handler):
         if getattr(self._guard, "active", False):
             return
         exc_type = record.exc_info[0] if record.exc_info else None
-        if record.exc_info and record.exc_info[1] is not None:
-            try:  # lets the excepthooks skip an exception that was logged first
-                setattr(record.exc_info[1], _CAPTURED_ATTR, True)
-            except Exception:
-                pass
         fingerprint = f"{record.name}:{record.msg}"
+        # A record the gate drops leaves the exception unmarked. A dedupe drop
+        # must not hide a later crash: the hook's record has another fingerprint
+        # and would be sent. A token-bucket drop needs no special handling: the
+        # hook's record would hit the same empty bucket anyway.
         if not self._admit((fingerprint, exc_type)):
             return
         props = {
@@ -231,11 +230,17 @@ class _PosthogErrorHandler(logging.Handler):
                     props["$exception_level"] = "error"
                 extra = {}
                 mechanism = getattr(record, "mechanism", None)
-                if mechanism:  # read by posthog-python 7.x; older SDKs ignore it
+                # posthog-python reads _capture_metadata from 7.65.0; 6.9 through
+                # 7.64 ignore it and send the crash as handled.
+                if mechanism:
                     extra["_capture_metadata"] = {"mechanism": mechanism}
                 self._client.capture_exception(
                     record.exc_info, distinct_id=distinct_id, properties=props, **extra
                 )
+                try:  # lets the excepthooks skip an exception that was logged first
+                    setattr(record.exc_info[1], _CAPTURED_ATTR, True)
+                except Exception:
+                    pass
             else:
                 props["$exception_list"] = [
                     {
