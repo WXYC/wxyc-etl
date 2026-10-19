@@ -129,7 +129,7 @@ def test_record_without_exc_info_synthesizes_exception_event():
     assert (props["service"], props["environment"]) == ("r-t", "production")
     assert props["$process_person_profile"] is False
     assert kwargs["distinct_id"] == "r-t"
-    # PostHog types $exception_fingerprint as a single string; a list is dropped.
+    # $exception_fingerprint must be one string: a list is ingested with $cymbal_errors and never becomes an issue.
     assert props["$exception_fingerprint"] == "etl.lookup:lookup failed for %s"
     assert (props["repo"], props["tool"], props["run_id"], props["step"]) == ("r", "t", "run-1", "import")
 
@@ -402,7 +402,12 @@ def test_long_running_bucket_resumes_after_burst_is_spent():
     [
         ({}, None, ("t-x-y", "production")),
         ({}, "staging", ("t-x-y", "staging")),
-        ({"service": "svc", "environment": "dev"}, "staging", ("svc", "dev")),
+        ({"service": "svc", "environment": "development"}, "staging", ("svc", "development")),
+        ({"service": "svc", "environment": "dev"}, "staging", ("svc", "development")),
+        ({}, "prod", ("t-x-y", "production")),
+        ({}, "stage", ("t-x-y", "staging")),
+        ({"environment": "local"}, None, ("t-x-y", "development")),
+        ({"environment": " Prod "}, None, ("t-x-y", "production")),
     ],
 )
 def test_service_and_environment_reach_the_event(monkeypatch, kwargs, env, expected):
@@ -515,3 +520,76 @@ def test_repeat_init_keeps_first_call_choice_to_skip(monkeypatch):
     cls.assert_not_called()
     assert not any(isinstance(h, mod._PosthogErrorHandler) for h in logging.getLogger().handlers)
     assert guard._posthog_client is None
+
+
+@pytest.mark.parametrize(
+    "installed,older",
+    [
+        ("6.9.0", True),
+        ("7.64.9", True),
+        ("7.65.0", False),
+        ("7.65.0rc1", False),
+        ("8.0.0b2", False),
+        ("7.65", False),
+        ("7.64.0rc1", True),
+        ("not-a-version", True),
+        ("", True),
+    ],
+)
+def test_older_than_level_support_parses_versions(monkeypatch, installed, older):
+    import importlib.metadata
+
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: installed)
+
+    assert mod._posthog_older_than_level_support() is older
+
+
+def test_older_than_level_support_true_when_not_installed(monkeypatch):
+    import importlib.metadata
+
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+
+    assert mod._posthog_older_than_level_support() is True
+
+
+@pytest.mark.parametrize("older", [True, False])
+def test_built_handler_sets_exception_level_only_for_old_sdk(monkeypatch, older):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    monkeypatch.setattr(mod, "_posthog_older_than_level_support", lambda: older)
+    cls = _stub_posthog(monkeypatch)
+
+    handler = mod._build_posthog_handler()
+    handler.handle(_record(exc_info=_exc_info()))
+
+    props = cls.return_value.capture_exception.call_args.kwargs["properties"]
+    assert props.get("$exception_level") == ("error" if older else None)
+
+
+def test_unknown_environment_passes_through_and_warns_once(monkeypatch, caplog):
+    monkeypatch.setattr(mod, "_WARNED_ENVIRONMENTS", set())
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    cls = _stub_posthog(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="wxyc_etl.logger"):
+        init_logger(repo="r", tool="t", environment="qa")
+        init_logger(repo="r", tool="t", environment="qa")
+
+    logging.getLogger("etl.lookup").error("lookup failed")
+
+    assert cls.return_value.capture.call_args.kwargs["properties"]["environment"] == "qa"
+    warnings = [r for r in caplog.records if "qa" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_later_call_with_different_ceilings_warns(monkeypatch, caplog):
+    monkeypatch.setenv("POSTHOG_ERRORS_API_KEY", "phc_errors")
+    _stub_posthog(monkeypatch)
+    init_logger(repo="r", tool="t", posthog_run_ceiling=2)
+    with caplog.at_level(logging.WARNING, logger="wxyc_etl.logger"):
+        init_logger(repo="r", tool="t", posthog_run_ceiling=2)
+        assert not caplog.records
+        init_logger(repo="r", tool="t", posthog_run_ceiling=5)
+
+    assert any("ceiling" in r.getMessage() for r in caplog.records)

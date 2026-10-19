@@ -30,6 +30,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -48,6 +49,18 @@ _SECONDS_PER_DAY = 86400
 # posthog 7.65.0+ sets $exception_level itself and warns when it is overridden.
 _POSTHOG_SETS_LEVEL_FROM = (7, 65, 0)
 _DEFAULT_ENVIRONMENT = "production"
+# The contract allows exactly production, staging and development; common
+# aliases are mapped onto them. Unknown values pass through with a warning.
+_ENVIRONMENT_ALIASES = {
+    "production": "production",
+    "prod": "production",
+    "staging": "staging",
+    "stage": "staging",
+    "development": "development",
+    "dev": "development",
+    "local": "development",
+}
+_WARNED_ENVIRONMENTS: set = set()
 POSTHOG_ERRORS_DEDUPE_WINDOW_SECONDS = 60.0
 _MAX_TRACKED_FINGERPRINTS = 512
 _DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
@@ -241,10 +254,40 @@ def _posthog_older_than_level_support() -> bool:
     try:
         from importlib.metadata import version
 
-        parts = tuple(int(p) for p in version("posthog").split(".")[:3])
+        raw = version("posthog")
     except Exception:
         return True
-    return parts < _POSTHOG_SETS_LEVEL_FROM
+    # Leading integers of each dot part, so "7.65.0rc1" reads as (7, 65, 0): a
+    # pre-release of 7.65 already sets the level itself.
+    parts = []
+    for part in raw.split(".")[:3]:
+        match = re.match(r"\d+", part)
+        if match is None:
+            break
+        parts.append(int(match.group()))
+    if not parts:
+        return True
+    parts += [0] * (3 - len(parts))
+    return tuple(parts) < _POSTHOG_SETS_LEVEL_FROM
+
+
+def _normalize_environment(value: str) -> str:
+    """Map ``value`` onto production, staging or development (case and
+    whitespace insensitive, with common aliases). An unknown value passes
+    through unchanged and logs a warning once."""
+
+    key = value.strip().lower()
+    mapped = _ENVIRONMENT_ALIASES.get(key)
+    if mapped is not None:
+        return mapped
+    if value not in _WARNED_ENVIRONMENTS:
+        _WARNED_ENVIRONMENTS.add(value)
+        logging.getLogger(__name__).warning(
+            "environment %r is not one of production, staging or development "
+            "(error-tracking contract); passing it through",
+            value,
+        )
+    return value
 
 
 def _build_posthog_handler(
@@ -293,6 +336,8 @@ _INITIALIZED = False
 # The PostHog client installed by the first init_logger call, so later guards
 # can drain it too.
 _POSTHOG_CLIENT: Any = None
+# The (run, daily) ceilings the first init_logger call built the handler with.
+_POSTHOG_BUDGET: Optional[tuple] = None
 
 
 def init_logger(
@@ -321,16 +366,22 @@ def init_logger(
     defaults to a scheduled run: ``posthog_run_ceiling`` events (10; pass 2 for
     a job that runs more than 4 times a day) and no refill. A long-running
     process must pass ``posthog_daily_ceiling`` instead, which selects a
-    capacity-20 bucket refilling at ceiling / 86,400 per second.
+    capacity-20 bucket refilling at ceiling / 86,400 per second. The handler
+    is built once, on the first call: ceilings passed on later calls are
+    ignored (a different pair logs a warning). ``environment`` is normalised to
+    production, staging or development (``prod``, ``stage``, ``dev`` and
+    ``local`` are aliases); an unknown value passes through with a warning.
     """
 
-    global _INITIALIZED, _POSTHOG_CLIENT
+    global _INITIALIZED, _POSTHOG_CLIENT, _POSTHOG_BUDGET
 
     rid = run_id or str(uuid.uuid4())
     dsn = sentry_dsn if sentry_dsn is not None else os.environ.get("SENTRY_DSN")
     sentry_enabled = bool(dsn)
     svc = service or "-".join(tool.lower().split())
-    env = environment or os.environ.get("WXYC_ENVIRONMENT") or _DEFAULT_ENVIRONMENT
+    env = _normalize_environment(
+        environment or os.environ.get("WXYC_ENVIRONMENT") or _DEFAULT_ENVIRONMENT
+    )
 
     if sentry_enabled:
         import sentry_sdk
@@ -372,6 +423,7 @@ def init_logger(
         root.addHandler(handler)
         root.setLevel(level)
 
+        _POSTHOG_BUDGET = (posthog_run_ceiling, posthog_daily_ceiling)
         posthog_handler = (
             _build_posthog_handler(posthog_run_ceiling, posthog_daily_ceiling)
             if posthog_errors
@@ -388,6 +440,15 @@ def init_logger(
         atexit.register(guard.flush)
         _INITIALIZED = True
         return guard
+
+    if posthog_errors and _POSTHOG_BUDGET != (posthog_run_ceiling, posthog_daily_ceiling):
+        logging.getLogger(__name__).warning(
+            "init_logger was already called with PostHog ceilings %r; ignoring "
+            "run/daily ceilings (%r, %r) because the handler is built once",
+            _POSTHOG_BUDGET,
+            posthog_run_ceiling,
+            posthog_daily_ceiling,
+        )
 
     # Already initialized: swap the context filter on the handlers this module
     # installed (the ones carrying a _ContextFilter) so the new
